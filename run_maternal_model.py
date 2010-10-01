@@ -33,6 +33,15 @@ def load_maternal() :
 	import numpy
 	maternal_raw = genfromdta('/home/j/Project/Causes of Death/CoDMod/Archive/CODMOD/Maternal Reviewer Responses/Final Run 3/maternal_db_from_paper_for_python.dta', missing_flt=numpy.NaN)
 
+	# create dummy variables by age/region
+	age_dummies = (maternal_raw['age'][:, None] == numpy.unique(maternal_raw['age'])).astype(float)
+	age_dummies.dtype = [('age_' + str(a.__int__()), 'float64') for a in numpy.unique(maternal_raw['age'])]
+	
+	
+	
+	maternal_raw = numpy.concatenate((maternal_raw, age_dummies), axis=1)
+
+
 	# return the appropriately shaped array
 	'''
 	x0: ln_LDI, x1: ln_LDI_sq, x2: educ, x3: neonatal_mort, x4: tfr, x5: year

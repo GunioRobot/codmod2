@@ -44,6 +44,8 @@ def fit_maternal(data=data) :
 	# load the model
 	run '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/model.py'
 
+	# 
+
 
 
 

@@ -15,7 +15,8 @@ def load_maternal() :
 
 	# load in the maternal dataset
 	import numpy
-	maternal_raw = stata_to_python.genfromdta('/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/maternal_paper_db_no_missing.dta', missing_flt=numpy.nan)
+	# maternal_raw = stata_to_python.genfromdta('/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/maternal_paper_db_no_missing.dta', missing_flt=numpy.nan)
+	maternal_raw = stata_to_python.genfromdta('/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/sample_dataset.dta', missing_flt=numpy.nan)
 
 	'''
 	# create dummy variables by age/region
@@ -36,7 +37,9 @@ def load_maternal() :
 # run the model	
 data = load_maternal()
 from model import *
-# gp_fit = gp_re_a(data)
+mod_mc = gp_re_a(data)
+iter = 20000
+mod_mc.sample(iter, iter/2, iter/2000, verbose=1)
 
 
 

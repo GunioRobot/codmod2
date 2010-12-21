@@ -39,6 +39,11 @@ sigma_s = mc.Exponential('sigma_s', beta=1., value=1.)
 sigma_d = mc.Exponential('sigma_d', beta=1., value=1.)
 sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
 
+# find fixed effect prediction
+@mc.deterministic
+def mu(X=X, beta=beta) :
+	return np.dot(beta, X)
+
 # create random effects for each district
 pi_d = [mc.Normal('pi_d%s'%d, mu=0., tau=sigma_d, value=0.) for d in np.unique(dist)]
 
@@ -50,25 +55,24 @@ for s in np.unique(school) :
 	# create random effect for this school
 	pi_ds.append(mc.Normal('pi_s%s'%s, mu=pi_d[np.where([np.unique(dist)==d])[0][0]], tau=sigma_d, value=0.))
 
-# predict the score for each student based on beta*X and random effects
+# predict the score for each student based on fixed and random effects
 param_preds = []
-for i in student : 
-	# school for this student
-	s = school[student==i]
-	@mc.deterministic
-	def param_pred(mu=mu, s=s, i=i):
-		# find school random effect for student i
-		pi_i = pi_ds[np.where([np.unique(school)==s])[0][0]]
-		# find fixed effect prediction for student i
-		mu_i = beta*X[np.where(student==i)]
-		# return the sum of fixed and random effects
-		param_pred = np.zeros_like(Y_obs)
-		param_pred[np.where(student==i)] = pi_i + mu_i
-		return param_pred
-	param_preds.append(param_pred)
+for s in np.unique(school) :
+	print(s)
+	# find indices for this school
+	s_i = np.where(school==s)[0]
+	s_s = np.where(np.unique(school)==s)[0]
+	# add up fixed/random effects
+	@mc.deterministic(name='param_pred_%s'%s)
+	def param_pred_s(s=s, mu=mu, pi_ds=pi_ds) :
+		param_pred_s = np.zeros_like(X)
+		param_pred_s[s_i] = mu[s_i] + pi_ds[s_s]
+		return param_pred_s
+	param_preds.append(param_pred_s)
 @mc.deterministic
-def predicted(param_preds=param_preds):
-	return pl.sum(country_age_param_pred, axis=0)
+def predicted(param_preds=param_preds) :
+	return np.sum(param_preds, axis=0)
+
 
 # observe the data
 @mc.observed
@@ -78,8 +82,3 @@ def obs(value=Y_obs) :
 # run the model
 mod_mc = mc.MCMC(vars())
 	
-
-
-# level 2 model
-'''
-'''

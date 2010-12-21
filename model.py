@@ -6,63 +6,22 @@ import pymc as mc
 import pymc.gp as gp
 import numpy
 
-def fe(data):
-	""" Fixed Effect model::
+def codmod(data):
+	''' Cause of death modelling with spatial-temporal(-ageal?) correlated random effects
 	
-		Y_r,c,t = beta * X_r,c,t + e_r,c,t
-		e_r,c,t ~ N(0, sigma^2)
-	"""
-	# covariates
-	K1 = count_covariates(data, 'x')
-	X = pl.array([data['x%d'%i] for i in range(K1)])
-
-	K2 = count_covariates(data, 'w')
-	W = pl.array([data['w%d'%i] for i in range(K1)])
-
-	# priors
-	beta = mc.Uninformative('beta', value=pl.zeros(K1))
-	gamma = mc.Uninformative('gamma', value=pl.zeros(K2))
-	sigma_e = mc.Uniform('sigma_e', lower=0, upper=1000, value=1)
-	
-	# predictions
-	@mc.deterministic
-	def mu(X=X, beta=beta):
-		return pl.dot(beta, X)
-	param_predicted = mu
-	@mc.deterministic
-	def sigma_explained(W=W, gamma=gamma):
-		""" sigma_explained_i,r,c,t,a = gamma * W_i,r,c,t,a"""
-		return pl.dot(gamma, W)
-
-	@mc.deterministic
-	def predicted(mu=mu, sigma_explained=sigma_explained, sigma_e=sigma_e):
-		return mc.rnormal(mu, 1 / (sigma_explained**2. + sigma_e**2.))
-
-	# likelihood
-	i_obs = pl.find(1 - pl.isnan(data.y))
-	@mc.observed
-	def obs(value=data.y, i_obs=i_obs, mu=mu, sigma_explained=sigma_explained, sigma_e=sigma_e):
-		return mc.normal_like(value[i_obs], mu[i_obs], 1. / (sigma_explained[i_obs]**2. + sigma_e**-2.))
-
-	# set up MCMC step methods
-	mod_mc = mc.MCMC(vars())
-	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
-
-	# find good initial conditions with MAP approx
-	print 'attempting to maximize likelihood'
-	var_list = [mod_mc.beta, mod_mc.obs, mod_mc.sigma_e]
-	mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-
-	return mod_mc
-
-
-def gp_re_a(data):
-	''' Random Effect model, with gaussian process correlations in residuals that
-	includes age::
-	
-		Y_r,c,t,a = beta * X_r,c,t,a + f_r(t) + g_r(a) + h_c(t) + e_r,c,t,a
-
-		f_r(t) ~ GP(0, C[0])
+		Y_c,t,a = beta * X_c,t,a + f_r(t) + g_r(a) + h_c(t) + e_r,c,t,a
+		
+		Y_c,t,a	~ ln(cause-specific death rate)
+		beta	~ fixed effects portion of the model
+				  covariates, region/country dummies, age dummies, time
+		f_r(t)	~ GP random effect over time by region
+		g_r(a)	~ GP random effect over age by region
+		h_ra(t)	~ GP random effect over time by region-age
+		
+		
+		
+		
+		
 		g_r(a) ~ GP(0, C[1])
 		h_c(t) ~ GP(0, C[2])
 
@@ -72,13 +31,10 @@ def gp_re_a(data):
 	'''
 	# covariates
 	K1 = count_covariates(data, 'x')
-	#K2 = count_covariates(data, 'w')
 	X = pl.array([data['x%d'%i] for i in range(K1)])
-	#W = pl.array([data['w%d'%i] for i in range(K2)])
 
 	# priors
 	beta = mc.Laplace('beta', mu=0., tau=1., value=pl.zeros(K1))
-	#gamma = mc.Exponential('gamma', beta=1., value=pl.zeros(K2))
 	sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
 
 	# hyperpriors for GPs  (These seem to really matter!)
@@ -89,14 +45,9 @@ def gp_re_a(data):
 	# fixed-effect predictions
 	@mc.deterministic
 	def mu(X=X, beta=beta):
-		'''mu_i,r,c,t,a = beta * X_i,r,c,t,a'''
+		'''mu_c,t,a = beta * X_c,t,a'''
 		return pl.dot(beta, X)
-	'''
-	@mc.deterministic
-	def sigma_explained(W=W, gamma=gamma):
-		# sigma_explained_i,r,c,t,a = gamma * W_i,r,c,t,a
-		return pl.dot(gamma, W)
-	'''
+
 
 
 	# GP random effects
@@ -124,15 +75,14 @@ def gp_re_a(data):
 	for i, grid in enumerate([years, ages, years, years, years]):
 		@mc.deterministic(name='C_%d'%i)
 		def C_i(i=i, grid=grid, sigma_f=sigma_f, tau_f=tau_f, diff_degree=diff_degree):
-			return gp.matern.euclidean(grid, grid, amp=sigma_f[i], scale=tau_f[i], diff_degree=diff_degree[i])
+			return gp.exponential.euclidean(grid, grid, amp=sigma_f[i], scale=tau_f[i], symm=True)
+			#return gp.matern.euclidean(grid, grid, amp=sigma_f[i], scale=tau_f[i], diff_degree=diff_degree[i], symm=True)
 		C.append(C_i)
 
 	## implement GPs as multivariate normals with appropriate covariance structure
 	f_gp = [mc.MvNormalCov('f_%s'%r, pl.zeros_like(years), C[0], value=pl.zeros_like(years)) for r in regions]
 	g_gp = [mc.MvNormalCov('g_%s'%r, pl.zeros_like(ages), C[1], value=pl.zeros_like(ages)) for r in regions]
 	h_gp = [mc.MvNormalCov('h_%s'%c, pl.zeros_like(years), C[2], value=pl.zeros_like(years)) for c in countries]
-	
-	
 	i_gp = [mc.MvNormalCov('i_%s'%ra, pl.zeros_like(years), C[3], value=pl.zeros_like(years)) for ra in region_ages]
 	j_gp = [mc.MvNormalCov('j_%s'%ca, pl.zeros_like(years), C[4], value=pl.zeros_like(years)) for ca in country_ages]
 	
@@ -230,6 +180,7 @@ def gp_re_a(data):
 		print 'Warning: Likelihood maximization canceled'
 									
 	return mod_mc
+
 
 
 # helper functions

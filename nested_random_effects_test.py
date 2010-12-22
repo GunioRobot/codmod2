@@ -2,6 +2,7 @@
 # Equivalent R code:
 library(mlmRev)
 data(Chem97)
+Chem97 <- Chem97[as.numeric(Chem97$lea)<=20,]
 m <- lmer(score ~ age + (1|lea:school), Chem97)
 ranef(m)
 '''
@@ -11,9 +12,10 @@ import numpy as np
 import pymc as mc
 from pylab import csv2rec
 Chem97 = csv2rec('/home/j/Project/Causes of Death/Sandbox/Chem97.csv')
+Chem97 = Chem97[Chem97.lea<=20,]
 
 # extract the necessary data
-Y_obs   = Chem97.score
+Y_obs   = Chem97.score.astype(float)
 X       = Chem97.age.astype(float)
 dist    = Chem97.lea
 school  = Chem97.school
@@ -76,9 +78,11 @@ def predicted(param_preds=param_preds) :
 
 # observe the data
 @mc.observed
-def obs(value=Y_obs) :
-	return value
+def obs(value=Y_obs, sigma_e=sigma_e, predicted=predicted) :
+	return mc.normal_like(value, predicted, 1/sigma_e**2)
 
-# run the model
+
+# fit the model via MAP
 mod_mc = mc.MCMC(vars())
-	
+mc.MAP(mod_mc).fit(verbose=1, iterlim=100000)
+

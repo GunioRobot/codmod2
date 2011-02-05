@@ -68,23 +68,27 @@ def load_maternal() :
 
 # run the model	
 data = load_maternal()
-from pylab import rec2csv
-rec2csv(data, 'maternal_data.csv')
 import codmod
 reload(codmod)
 print('Data loaded')
-mod_mc = codmod.fit(data)
-print('Initial optimization complete')
+cm_mod = codmod.model(data)
+print('Model built')
+cm_fit = codmod.fit(cm_mod)
+print('Normal Approximation found')
+cm_sample = codmod.sample(cm_fit, n=10)
+
 '''iter = 5000
-mod_mc.sample(iter, burn=1000, thin=2, verbose=1)
+mod_mc.sample(iter, burn=1000, thin=1, verbose=1)
 print('MCMC sampling complete')
 
-
-
 # save the results
-predicted_y = mod_mc.param_predicted.stats()['mean']
+predicted_y = mod_mc.param_pred.stats()['mean']
 results = rf.append_fields(data, 'prediction', predicted_y)
-rec2csv(results, '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/maternal_results_actually_all_data.csv')
+lower_y = mod_mc.param_pred.stats()['95% HPD interval'][:,0]
+results = rf.append_fields(results, 'lower', lower_y)
+upper_y = mod_mc.param_pred.stats()['95% HPD interval'][:,1]
+results = rf.append_fields(results, 'upper', upper_y)
+rec2csv(results, '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/asia_maternal_results.csv')
 '''
 
 

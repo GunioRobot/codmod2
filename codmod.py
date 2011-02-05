@@ -7,7 +7,7 @@ import pymc as mc
 import pymc.gp as gp
 import numpy as np
 
-def fit(data):
+def model(data):
 	''' Cause of death modelling with random effects correlated over space/time/age
 
 		Y_c,t,a = Beta*X_c,t,a + GP_r(t) + GP_r(a) + GP_c(t) + GP_c(a) + e_c,t,a
@@ -66,8 +66,8 @@ def fit(data):
 	
 	# fixed-effect predictions
 	@mc.deterministic
-	def mu(X=X, beta=beta):
-		'''mu_c,t,a = beta * X_c,t,a'''
+	def fixed_effect(X=X, beta=beta):
+		'''fixed_effect_c,t,a = beta * X_c,t,a'''
 		return np.dot(beta, X)
 
 	# variance-covariance matrices for region GPs
@@ -127,8 +127,8 @@ def fit(data):
 
 	# parameter predictions
 	@mc.deterministic
-	def param_pred(mu=mu, GP_rt_pred=GP_rt_pred, GP_ra_pred=GP_ra_pred, GP_ct_pred=GP_ct_pred, GP_ca_pred=GP_ca_pred):
-		return np.vstack([mu, GP_rt_pred, GP_ra_pred, GP_ct_pred, GP_ca_pred]).sum(axis=0)
+	def param_pred(fixed_effect=fixed_effect, GP_rt_pred=GP_rt_pred, GP_ra_pred=GP_ra_pred, GP_ct_pred=GP_ct_pred, GP_ca_pred=GP_ca_pred):
+		return np.vstack([fixed_effect, GP_rt_pred, GP_ra_pred, GP_ct_pred, GP_ca_pred]).sum(axis=0)
 
 	# data likelihood
 	@mc.deterministic
@@ -140,34 +140,18 @@ def fit(data):
 	@mc.observed
 	def data_likelihood(value=data.y, i=obs_index, mu=param_pred, tau=tau_pred):
 		return mc.normal_like(value[i], mu[i], tau[i])
-
-	# MCMC step methods
-	mod_mc = mc.MCMC(vars(), db='ram')
-	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
 	
-	# use covariance matrix to seed adaptive metropolis steps
-	for r in range(len(regions)):
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_rt[r], cov=np.array(C_rt.value*.01))
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ra[r], cov=np.array(C_ra.value*.01))
-	for c in range(len(countries)):
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ct[c], cov=np.array(C_ct.value*.01))
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ca[c], cov=np.array(C_ca.value*.01))
+	# create an HDF5 backend to store the model
+	import time as tm
+	dbname = '/tmp/codmod_' + str(np.int(tm.time()))
+	db = mc.database.hdf5.Database(dbname=dbname, dbmode='w')
+	
+	return mc.MCMC(vars(), db=db)
 
-	# find good initial conditions with MAP approximation
-	try:
-		for var_list in [[data_likelihood, beta]] + \
-			[[data_likelihood, rt] for rt in GP_rt] + \
-			[[data_likelihood, ra] for ra in GP_ra] + \
-			[[data_likelihood, ct] for ct in GP_ct] + \
-			[[data_likelihood, ca] for ca in GP_ca] + \
-			[[data_likelihood, beta, sigma_e]] :
-			print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-			mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-			print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-	except mc.ZeroProbability, e:
-		print 'Warning: Optimization became infeasible:\n', e
-	except KeyboardInterrupt:
-		print 'Warning: Likelihood maximization canceled'
-									
-	return mod_mc
+def fit(model):
+	return mc.NormApprox(model).fit()
+
+def sample(norm_approx, n=1000):
+	return norm_approx.sample(n)
+
 

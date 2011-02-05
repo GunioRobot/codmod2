@@ -56,7 +56,7 @@ def load_maternal() :
 	''',	numpy.zeros(len(maternal_raw)), numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)),	numpy.zeros(len(maternal_raw)), numpy.zeros(len(maternal_raw)), numpy.zeros(len(maternal_raw)), numpy.zeros(len(maternal_raw)), numpy.zeros(len(maternal_raw))'''
 
 	# filter data for fast debugging and testing
-	# data = [d for d in data if d[0].startswith('Asia')]
+	data = [d for d in data if d[0].startswith('Asia')]
 	print 'data rows: ', len(data)
 	assert len(data) > 0
 	
@@ -70,11 +70,12 @@ def load_maternal() :
 data = load_maternal()
 from pylab import rec2csv
 rec2csv(data, 'maternal_data.csv')
-from model import *
+import codmod
+reload(codmod)
 print('Data loaded')
-mod_mc = gp_re_a(data)
+mod_mc = codmod.fit(data)
 print('Initial optimization complete')
-iter = 5000
+'''iter = 5000
 mod_mc.sample(iter, burn=1000, thin=2, verbose=1)
 print('MCMC sampling complete')
 
@@ -84,7 +85,7 @@ print('MCMC sampling complete')
 predicted_y = mod_mc.param_predicted.stats()['mean']
 results = rf.append_fields(data, 'prediction', predicted_y)
 rec2csv(results, '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/maternal_results_actually_all_data.csv')
-
+'''
 
 
 

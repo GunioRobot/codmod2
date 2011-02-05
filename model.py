@@ -89,9 +89,12 @@ def codmod(data):
 
 	# parameter predictions and data likelihood
 	## organize observations into country panels and calculate predicted value before sampling error
-	country_age_param_pred = []
-	country_age_tau = []
-	for ca in pl.unique(data.country_age):
+	country_age_param_pred = [0 for i in range(pl.unique(data.country_age).shape[0])]
+	#country_age_param_pred = []
+	country_age_tau = [0 for i in range(pl.unique(data.country_age).shape[0])]
+	#country_age_tau = []
+	for j, ca in enumerate(pl.unique(data.country_age)):
+		print "Country-age " + str(j+1) + " of " + str(pl.unique(data.country_age).shape[0])
 		## find indices for this country
 		i_ca = [i for i in range(len(data)) if data.country_age[i] == ca]
 
@@ -109,11 +112,15 @@ def codmod(data):
 		## find predicted parameter value for all observations of country-age ca
 		@mc.deterministic(name='country_age_param_pred_%s'%ca)
 		def country_age_param_pred_ca(i_ca=i_ca, mu=mu, f_gp=f_gp[r_index_ca], g_gp=g_gp[r_index_ca], h_gp=h_gp[c_index_ca], i_gp=i_gp[ra_index_ca], j_gp=j_gp[ca_index_ca], a=a_index_ca, t=t_index_ca):
+		
+		'''move loop into here'''
+		
 			''' country_param_pred_c[row] = parameter_predicted[row] * 1[row.country == c]'''
 			country_age_param_pred_ca = pl.zeros_like(data.y)
 			country_age_param_pred_ca[i_ca] = mu[i_ca] + f_gp[t] + g_gp[a] + h_gp[t] + i_gp[t] + j_gp[t]
 			return country_age_param_pred_ca
-		country_age_param_pred.append(country_age_param_pred_ca)
+		country_age_param_pred[j] = country_age_param_pred_ca
+		#country_age_param_pred.append(country_age_param_pred_ca)
 
 		## find predicted parameter precision for all observations of country c
 		@mc.deterministic(name='country_age_tau_%s'%ca)
@@ -124,7 +131,7 @@ def codmod(data):
 			# country_tau_c[i_c] = 1 / (sigma_e**2. + sigma_explained[i_c]**2. + var_d_c)
 			country_age_tau_ca[i_ca] = 1 / (sigma_e**2. + var_d_ca)
 			return country_age_tau_ca
-		country_age_tau.append(country_age_tau_ca)
+		country_age_tau[j] = country_age_tau_ca
 
 	@mc.deterministic
 	def param_predicted(country_age_param_pred=country_age_param_pred):
@@ -141,8 +148,8 @@ def codmod(data):
 
 	i_obs = [i for i in range(len(data)) if not pl.isnan(data.y[i])]
 	@mc.observed
-	def obs(value=data.y, i=i_obs, param_predicted=param_predicted, tau=tau):
-		return mc.normal_like(value[i], param_predicted[i], tau[i])
+	def obs(value=data.y, i=i_obs, mu=param_predicted, tau=tau):
+		return mc.normal_like(value[i], mu[i], tau[i])
 
 	# MCMC step methods
 	mod_mc = mc.MCMC(vars(), db='ram')

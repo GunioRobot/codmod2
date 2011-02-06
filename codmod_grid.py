@@ -43,12 +43,12 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	beta = mc.Laplace('beta', mu=0., tau=1., value=np.zeros(k+1))
 	# prior on sd of error term
 	sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
-	# priors on sd of grid samples
-	tau_r = mc.Gamma('tau_r', alpha=2., beta=2., value=1.)
-	tau_c = mc.Gamma('tau_c', alpha=2., beta=1., value=2.)
-	# priors on covariance multiplier (relationship between points on grid)
-	rho_r = mc.Truncnorm('rho_r', mu=1., tau=1., a=0., b=3., value=1.)
-	rho_c = mc.Truncnorm('rho_c', mu=1., tau=1., a=0., b=5., value=1.)
+	# priors on GP amplitudes
+	sigma_r = mc.Exponential('sigma_r', beta=2., value=2.)
+	sigma_c = mc.Exponential('sigma_c', beta=1., value=1.)
+	# priors on GP scales
+	tau_r = mc.Truncnorm('tau_r', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
+	tau_c = mc.Truncnorm('tau_c', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
 
 	# find indices for each subset
 	regions = np.unique(data.region)
@@ -66,47 +66,33 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 		'''fixed_effect_c,t,a = beta * X_c,t,a'''
 		return np.dot(beta, X)
 	
-	# find grid distances
-	C_grid = np.zeros((len(sample_years)*len(sample_ages), len(sample_years)*len(sample_ages)))
-	for x1 in range(len(sample_years)):
-		for x2 in range(len(sample_ages)):
-			for y1 in range(len(sample_years)):
-				for y2 in range(len(sample_ages)):
-					C_grid[x1*len(sample_ages)+x2,y1*len(sample_ages)+y2] = (1.-np.abs(np.float(x1)-np.float(y1))/(len(sample_years)+1.))*(1.-np.abs(np.float(x2)-np.float(y2))/(len(sample_ages)+1.))
-
-	# figure out where each sample point falls in the overall grid
-	a_grid_lookup = np.empty((len(sample_years)*len(sample_ages)))
-	t_grid_lookup = np.empty((len(sample_years)*len(sample_ages)))
-	for x1,t in enumerate(sample_years):
-		for x2,a in enumerate(sample_ages):
-			a_grid_lookup[x1*len(sample_ages)+x2] = a_index[a]
-			t_grid_lookup[x1*len(sample_ages)+x2] = t_index[t]
+	
+	# find all the points on which to evaluate the random effects grid
+	sample_points = []
+	for a in sample_ages:
+		for t in sample_years:
+			sample_points.append([a,t])
+	sample_points = np.array(sample_points)
 
 	# make variance-covariance matrices for the sampling grid
 	@mc.deterministic
-	def C_r(tau=tau_r, rho=rho_r, C_grid=C_grid):
-		C = C_grid * rho
-		for i in range(C.shape[0]):
-			C[i,i] = tau
-		return C
+	def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
+		return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
 
 	@mc.deterministic
-	def C_c(tau=tau_c, rho=rho_c, C_grid=C_grid):
-		C = C_grid * rho
-		for i in range(C.shape[0]):
-			C[i,i] = tau
-		return C
+	def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
+		return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
 
 	# draw samples for each random effect matrix
-	pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(C_grid.shape[0]), C_r, value=np.zeros(C_grid.shape[0])) for r in regions]
-	pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(C_grid.shape[0]), C_c, value=np.zeros(C_grid.shape[0])) for c in countries]
+	pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
+	pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
 
 	# interpolate to create the complete random effect matrices, then convert into 1d arrays
 	@mc.deterministic
 	def pi_r(pi_samples=pi_r_samples):
 		pi_r = np.zeros(data.shape[0])
 		for r in range(len(regions)):
-			interpolator = interpolate.interp2d(x=a_grid_lookup, y=t_grid_lookup, z=pi_samples[r], kind='cubic', bounds_error=False, fill_value=0.)
+			interpolator = interpolate.interp2d(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], kind='cubic', bounds_error=False, fill_value=0.)
 			pi_r_grid = interpolator(x=ages, y=years)
 			t = [t_index[data.year[j]] for j in r_index[r][0]]
 			a = [a_index[data.age[j]] for j in r_index[r][0]]
@@ -117,11 +103,11 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	def pi_c(pi_samples=pi_c_samples):
 		pi_c = np.zeros(data.shape[0])
 		for c in range(len(countries)):
-			interpolator = interpolate.interp2d(x=a_grid_lookup, y=t_grid_lookup, z=pi_samples[c], kind='cubic', bounds_error=False, fill_value=0.)
+			interpolator = interpolate.interp2d(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], kind='cubic', bounds_error=False, fill_value=0.)
 			pi_c_grid = interpolator(x=ages, y=years)
 			t = [t_index[data.year[j]] for j in c_index[c][0]]
 			a = [a_index[data.age[j]] for j in c_index[c][0]]
-			pi_c[c_index[c]] = pi_c_grid[t,a]		
+			pi_c[c_index[c]] = pi_c_grid[t,a]
 		return pi_c
 
 	# parameter predictions

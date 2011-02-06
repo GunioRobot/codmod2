@@ -45,13 +45,13 @@ def model(data):
 	sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
 
 	# hyperpriors for GPs
-	sigma_f_rt = mc.Exponential('sigma_f_rt', beta=1., value=1.)
+	sigma_f_rt = mc.Exponential('sigma_f_rt', beta=.5, value=.5)
 	tau_f_rt = mc.Truncnorm('tau_f_rt', mu=15., tau=5.**-2, a=5, b=25, value=15.)
-	sigma_f_ra = mc.Exponential('sigma_f_ra', beta=1., value=1.)
+	sigma_f_ra = mc.Exponential('sigma_f_ra', beta=.5, value=.5)
 	tau_f_ra = mc.Truncnorm('tau_f_ra', mu=15., tau=5.**-2, a=0, b=80, value=15.)
-	sigma_f_ct = mc.Exponential('sigma_f_ct', beta=.5, value=.5)
+	sigma_f_ct = mc.Exponential('sigma_f_ct', beta=1., value=1.)
 	tau_f_ct = mc.Truncnorm('tau_f_ct', mu=15., tau=5.**-2, a=5, b=25, value=15.)
-	sigma_f_ca = mc.Exponential('sigma_f_ca', beta=.5, value=.5)
+	sigma_f_ca = mc.Exponential('sigma_f_ca', beta=1., value=1.)
 	tau_f_ca = mc.Truncnorm('tau_f_ca', mu=15., tau=5.**-2, a=0, b=80, value=15.)
 	
 	# find indices for each subset
@@ -141,17 +141,41 @@ def model(data):
 	def data_likelihood(value=data.y, i=obs_index, mu=param_pred, tau=tau_pred):
 		return mc.normal_like(value[i], mu[i], tau[i])
 	
-	# create an HDF5 backend to store the model
+	# create a pickle backend to store the model
 	import time as tm
 	dbname = '/tmp/codmod_' + str(np.int(tm.time()))
-	db = mc.database.hdf5.Database(dbname=dbname, dbmode='w')
+	db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+
+	# MCMC step methods
+	mod_mc = mc.MCMC(vars(), db=db)
+	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
 	
-	return mc.MCMC(vars(), db=db)
+	# use covariance matrix to seed adaptive metropolis steps
+	for r in range(len(regions)):
+		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_rt[r], cov=np.array(C_rt.value*.01))
+		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ra[r], cov=np.array(C_ra.value*.01))
+	for c in range(len(countries)):
+		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ct[c], cov=np.array(C_ct.value*.01))
+		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ca[c], cov=np.array(C_ca.value*.01))
+	
+	# return the whole object as a model
+	return mod_mc
 
-def fit(model):
-	return mc.NormApprox(model).fit()
+def find_init_vals(mod_mc):
+	# find good initial conditions with MAP approximation
+	for var_list in [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]] + \
+		[[mod_mc.data_likelihood, rt] for rt in mod_mc.GP_rt] + \
+		[[mod_mc.data_likelihood, ra] for ra in mod_mc.GP_ra] + \
+		[[mod_mc.data_likelihood, ct] for ct in mod_mc.GP_ct] + \
+		[[mod_mc.data_likelihood, ca] for ca in mod_mc.GP_ca] + \
+		[[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]]:
+		print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+		mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
+		print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
+	return mod_mc
 
-def sample(norm_approx, n=1000):
-	return norm_approx.sample(n)
+def sample(mod_mc, n=1000):
+	mod_mc.sample(n)
+	return mod_mc
 
 

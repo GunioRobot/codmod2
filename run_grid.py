@@ -41,7 +41,7 @@ def load_maternal() :
 		(maternal_raw['age']==45).astype(float))
 
 	# filter data for fast debugging and testing
-	#data = [d for d in data if d[0].startswith('Asia')]
+	data = [d for d in data if d[0].startswith('Asia')]
 	#data = [d for d in data if (d[2]>=1995)&(d[2]<=2000)]
 	#data = [d for d in data if (d[3]>=30)&(d[3]<=40)]
 	
@@ -58,15 +58,15 @@ def load_maternal() :
 
 # run the model	
 data = load_maternal()
-import codmod
-reload(codmod)
+import codmod_grid
+reload(codmod_grid)
 print('Data loaded')
-cm_mod = codmod.model(data)
+cm_mod = codmod_grid.model(data)
 print('Model built')
-cm_init = codmod.find_init_vals(cm_mod)
+cm_init = codmod_grid.find_init_vals(cm_mod)
 print('MAP found')
-cm_sample = codmod.sample(cm_init, n=10)
-print('Sampling complete')
+#cm_sample = codmod_grid.sample(cm_init, n=10)
+#print('Sampling complete')
 
 
 '''

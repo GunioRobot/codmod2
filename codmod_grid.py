@@ -140,7 +140,8 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
 
 	# MCMC step methods
-	mod_mc = mc.MCMC(vars(), db=db)
+	#mod_mc = mc.MCMC(vars(), db=db)
+	mod_mc = mc.MCMC(vars(), db='ram')
 	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
 	
 	# use covariance matrix to seed adaptive metropolis steps

@@ -9,7 +9,7 @@ import numpy as np
 from scipy import interpolate
 import threadpool
 
-threadpool.set_threadpool_size(4)
+threadpool.set_threadpool_size(8)
 
 def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.,45.], year_range=[1980,2010], age_range=[15,45]):
 	''' Cause of death modelling with random effects correlated over space/time/age
@@ -99,36 +99,31 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
 
 	# interpolate to create the complete random effect matrices, then convert into 1d arrays
-	def find_pi_r_grid(mvn, r):
+	def find_pi_r_grid(mvn, r, pi_r):
 		interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=mvn[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
 		pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-		mvn[r] = pi_r_grid
+		t = [t_index[data.year[j]] for j in r_index[r][0]]
+		a = [a_index[data.age[j]] for j in r_index[r][0]]
+		pi_r[r_index[r][0]] = pi_r_grid[a,t]
 	@mc.deterministic
 	def pi_r(pi_samples=pi_r_samples):
 		targ = pi_samples
-		threadpool.map_noreturn(find_pi_r_grid, [(targ, r) for r in range(len(regions))])
 		pi_r = np.zeros(data.shape[0])
-		for r in range(len(regions)):
-			t = [t_index[data.year[j]] for j in r_index[r][0]]
-			a = [a_index[data.age[j]] for j in r_index[r][0]]
-			pi_r[r_index[r]] = pi_samples[r][a,t]
+		threadpool.map_noreturn(find_pi_r_grid, [(targ, r, pi_r) for r in range(len(regions))])
 		return pi_r
-	def find_pi_c_grid(mvn, c):
+	def find_pi_c_grid(mvn, c, pi_c):
 		interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=mvn[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
 		pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-		mvn[c] = pi_c_grid
+		t = [t_index[data.year[j]] for j in c_index[c][0]]
+		a = [a_index[data.age[j]] for j in c_index[c][0]]
+		pi_c[c_index[c]] = pi_c_grid[a,t]
 	@mc.deterministic
 	def pi_c(pi_samples=pi_c_samples):
 		targ = pi_samples
-		threadpool.map_noreturn(find_pi_c_grid, [(targ, c) for c in range(len(countries))])
 		pi_c = np.zeros(data.shape[0])
-		for c in range(len(countries)):
-			t = [t_index[data.year[j]] for j in c_index[c][0]]
-			a = [a_index[data.age[j]] for j in c_index[c][0]]
-			pi_c[c_index[c]] = pi_samples[c][a,t]
+		threadpool.map_noreturn(find_pi_c_grid, [(targ, c, pi_c) for c in range(len(countries))])
 		return pi_c
-	
-	
+
 	# parameter predictions
 	@mc.deterministic
 	def param_pred(fixed_effect=fixed_effect, pi_r=pi_r, pi_c=pi_c):
@@ -151,7 +146,8 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
 
 	# MCMC step methods
-	mod_mc = mc.MCMC(vars(), db=db)
+	#mod_mc = mc.MCMC(vars(), db=db)
+	mod_mc = mc.MCMC(vars(), db='ram')
 	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
 	
 	# use covariance matrix to seed adaptive metropolis steps

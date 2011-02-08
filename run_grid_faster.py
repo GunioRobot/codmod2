@@ -60,12 +60,12 @@ def load_maternal() :
 import time
 print 'started at ', time.localtime()
 data = load_maternal()
-import codmod_grid_faster
-reload(codmod_grid_faster)
+import codmod_grid_threaded
+reload(codmod_grid_threaded)
 print('Data loaded', time.localtime())
-cm_mod = codmod_grid_faster.model(data)
+cm_mod = codmod_grid_threaded.model(data)
 print('Model built', time.localtime())
-cm_init = codmod_grid_faster.find_init_vals(cm_mod)
+cm_init = codmod_grid_threaded.find_init_vals(cm_mod)
 print('MAP found', time.localtime())
 #cm_init.sample(iter=3000, burn=100, verbose=2, thin=2, tune_interval=500)
 #print('Sampling complete', time.localtime())

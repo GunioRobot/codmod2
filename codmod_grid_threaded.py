@@ -9,7 +9,7 @@ import numpy as np
 from scipy import interpolate
 import threadpool
 
-threadpool.set_threadpool_size(8)
+threadpool.set_threadpool_size(4)
 
 def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.,45.], year_range=[1980,2010], age_range=[15,45]):
 	''' Cause of death modelling with random effects correlated over space/time/age
@@ -102,44 +102,33 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	def find_pi_r_grid(mvn, r):
 		interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=mvn[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
 		pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-		t = [t_index[data.year[j]] for j in r_index[r][0]]
-		a = [a_index[data.age[j]] for j in r_index[r][0]]
-		pi_r = np.zeros(data.shape[0])
-		pi_r[r_index[r]] = pi_r_grid[a,t]
-		mvn[r] = pi_r
-	@mc.deterministic
-	def pi_r_grid(pi_samples=pi_r_samples):
-		targ = pi_samples
-		threadpool.map_noreturn(find_pi_r_grid, [(targ, r) for r in range(len(regions))])
-		return targ
-	@mc.deterministic
-	def pi_r(pi_grid=pi_r_grid):
-		return np.sum(pi_grid, axis=0)
-	
-	
-	'''
+		mvn[r] = pi_r_grid
 	@mc.deterministic
 	def pi_r(pi_samples=pi_r_samples):
+		targ = pi_samples
+		threadpool.map_noreturn(find_pi_r_grid, [(targ, r) for r in range(len(regions))])
 		pi_r = np.zeros(data.shape[0])
 		for r in range(len(regions)):
-			interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-			pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
 			t = [t_index[data.year[j]] for j in r_index[r][0]]
 			a = [a_index[data.age[j]] for j in r_index[r][0]]
-			pi_r[r_index[r]] = pi_r_grid[a,t]
+			pi_r[r_index[r]] = pi_samples[r][a,t]
 		return pi_r
-'''
+	def find_pi_c_grid(mvn, c):
+		interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=mvn[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+		pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+		mvn[c] = pi_c_grid
 	@mc.deterministic
 	def pi_c(pi_samples=pi_c_samples):
+		targ = pi_samples
+		threadpool.map_noreturn(find_pi_c_grid, [(targ, c) for c in range(len(countries))])
 		pi_c = np.zeros(data.shape[0])
 		for c in range(len(countries)):
-			interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-			pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
 			t = [t_index[data.year[j]] for j in c_index[c][0]]
 			a = [a_index[data.age[j]] for j in c_index[c][0]]
-			pi_c[c_index[c]] = pi_c_grid[a,t]
+			pi_c[c_index[c]] = pi_samples[c][a,t]
 		return pi_c
-
+	
+	
 	# parameter predictions
 	@mc.deterministic
 	def param_pred(fixed_effect=fixed_effect, pi_r=pi_r, pi_c=pi_c):

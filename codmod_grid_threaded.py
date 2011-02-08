@@ -7,6 +7,9 @@ import pymc as mc
 import pymc.gp as gp
 import numpy as np
 from scipy import interpolate
+import threadpool
+
+threadpool.set_threadpool_size(8)
 
 def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.,45.], year_range=[1980,2010], age_range=[15,45]):
 	''' Cause of death modelling with random effects correlated over space/time/age
@@ -96,6 +99,25 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 	pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
 
 	# interpolate to create the complete random effect matrices, then convert into 1d arrays
+	def find_pi_r_grid(mvn, r):
+		interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=mvn[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+		pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+		t = [t_index[data.year[j]] for j in r_index[r][0]]
+		a = [a_index[data.age[j]] for j in r_index[r][0]]
+		pi_r = np.zeros(data.shape[0])
+		pi_r[r_index[r]] = pi_r_grid[a,t]
+		mvn[r] = pi_r
+	@mc.deterministic
+	def pi_r_grid(pi_samples=pi_r_samples):
+		targ = pi_samples
+		threadpool.map_noreturn(find_pi_r_grid, [(targ, r) for r in range(len(regions))])
+		return targ
+	@mc.deterministic
+	def pi_r(pi_grid=pi_r_grid):
+		return np.sum(pi_grid, axis=0)
+	
+	
+	'''
 	@mc.deterministic
 	def pi_r(pi_samples=pi_r_samples):
 		pi_r = np.zeros(data.shape[0])
@@ -106,7 +128,7 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 			a = [a_index[data.age[j]] for j in r_index[r][0]]
 			pi_r[r_index[r]] = pi_r_grid[a,t]
 		return pi_r
-
+'''
 	@mc.deterministic
 	def pi_c(pi_samples=pi_c_samples):
 		pi_c = np.zeros(data.shape[0])

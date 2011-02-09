@@ -64,6 +64,10 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 		ages = range(5,age_range[1]+1,5)
 		ages.insert(0,1)
 	a_index = dict([(a, i) for i, a in enumerate(ages)])
+	t_by_r = [[t_index[data.year[j]] for j in r_index[r][0]] for r in range(len(regions))]
+	a_by_r = [[a_index[data.age[j]] for j in r_index[r][0]] for r in range(len(regions))]
+	t_by_c = [[t_index[data.year[j]] for j in c_index[c][0]] for c in range(len(countries))]
+	a_by_c = [[a_index[data.age[j]] for j in c_index[c][0]] for c in range(len(countries))]	
 	
 	# fixed-effect predictions
 	@mc.deterministic
@@ -102,9 +106,7 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 		for r in range(len(regions)):
 			interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
 			pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-			t = [t_index[data.year[j]] for j in r_index[r][0]]
-			a = [a_index[data.age[j]] for j in r_index[r][0]]
-			pi_r[r_index[r]] = pi_r_grid[a,t]
+			pi_r[r_index[r]] = pi_r_grid[a_by_r[r],t_by_r[r]]
 		return pi_r
 
 	@mc.deterministic
@@ -113,9 +115,7 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
 		for c in range(len(countries)):
 			interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
 			pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-			t = [t_index[data.year[j]] for j in c_index[c][0]]
-			a = [a_index[data.age[j]] for j in c_index[c][0]]
-			pi_c[c_index[c]] = pi_c_grid[a,t]
+			pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
 		return pi_c
 
 	# parameter predictions

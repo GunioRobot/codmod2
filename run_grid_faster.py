@@ -52,8 +52,7 @@ def load_maternal() :
 	assert len(data) > 0
 	
 	return np.array(data, dtype=[('region','|S35'),('country','|S3'),('year','<f8'),('age','<f8'),('y','<f8'),('se','<f8'),('x0','<f8'),('x1','<f8'),('x2','<f8'),('x3','<f8'),('x4','<f8'),('x5','<f8'),('x6','<f8'),('x7','<f8'),('x8','<f8'),('x9','<f8'),('x10','<f8'),('x11','<f8')]).view(np.recarray)
-	
-	
+
 
 
 # run the model	
@@ -67,8 +66,8 @@ cm_mod = codmod_grid_threaded.model(data)
 print('Model built', time.localtime())
 cm_init = codmod_grid_threaded.find_init_vals(cm_mod)
 print('MAP found', time.localtime())
-#cm_init.sample(iter=3000, burn=100, verbose=2, thin=2, tune_interval=500)
-#print('Sampling complete', time.localtime())
+cm_init.sample(iter=100, verbose=2)
+print('Sampling complete (threaded)', time.localtime())
 
 
 '''

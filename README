@@ -1,8 +1,22 @@
-pymc-space-time-regression - a collection of pymc models for imputing
-missing values for spatio-temporal health data
+        Y_c,t,a = beta*X_c,t,a + pi_r + pi_c + e_c,t,a
 
-models.py contains some simple and more complicated models
+            where	r: region
+                    c: country
+                    t: year
+                    a: age
 
-data.py contains functions for generating synthetic data according to these models
+        Y_c,t,a		~ ln(cause-specific death rate)
 
-graphics.py contains functions for visualizing the results
+        beta 		~ fixed effects (coefficients on covariates)
+                      Laplace with Mean = 0
+        X			~ covariates, by country/year/age
+
+        pi_r		~ 'random effect' by region
+                      a year*age grid of offsets
+                      calculated by sampling a few year/age pairs then interpolating via cubic spline
+        pi_c		~ 'random effect' by country
+                      a year*age grid of offsets
+                      calculated by sampling a few year/age pairs then interpolating
+
+        e_c,t,a 	~ Error
+                      N(0, sigma_e^2)

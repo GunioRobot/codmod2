@@ -35,18 +35,35 @@ class codmod:
             self.sex = 2
         else:
             raise ValueError("Specify sex as either 'male' or 'female'")
-        self.covariates()
-        self.window()
-        self.pi_samples()
+        self.connect()
+        self.set_covariates()
+        self.set_window()
+        self.set_pi_samples()
 
-    def window(self, age_range=[0,80], year_range=[1980,2010]):
+    def set_window(self, age_range=[0,80], year_range=[1980,2010]):
         '''
         Change which year and age ranges the model predicts for
         '''
         self.age_range = age_range
         self.year_range = year_range
 
-    def pi_samples(self, age_samples=[0,1,15,25,40,55,65,80], year_samples=[1980,1990,2000,2010]):
+    def connect(self):
+        '''
+        Connect to the MySQL database.
+        There should be a file .mysql.cnf in the same directory, formatted as such:
+            host = 'concrete.ihme.washington.edu'
+            db = 'codmod'
+            user = 'codmod'
+            passwd = 'password'
+        '''
+        mysql_opts = open('./mysql.cnf')
+        for l in mysql_opts:
+            exec l
+        self.mysql = MySQLdb.connect(host=host, db=db, user=user, passwd=passwd)
+        self.cursor = self.mysql.cursor()
+        self.dcursor = self.mysql.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+
+    def set_pi_samples(self, age_samples=[0,1,15,25,40,55,65,80], year_samples=[1980,1990,2000,2010]):
         '''
         Change which years and ages to sample pi (the random effect component) at
         '''
@@ -57,22 +74,24 @@ class codmod:
         '''
         Return a list of which covariates are available for use in the model
         '''
-        return covs
+        self.cursor.execute('SELECT variable_label,variable_name FROM covariate_list;')
+        return self.cursor.fetchall()
 
     def list_causes(self):
         '''
-        Return a list of cause codes with names
+        Return a list mapping cause codes with names
         '''
-        return causes
+        self.cursor.execute("SELECT cod_cause,cod_cause_name FROM cod_causes WHERE substr(cod_cause,length(cod_cause),1)!='x';")
+        return self.cursor.fetchall()
 
-    def covariates(self, covariate_list=['education_years_pc'], age_dummies=True):
+    def set_covariates(self, covariate_list=['education_years_pc'], age_dummies=True):
         '''
         By default, the model will just use education as a covariate, plus age dummies.
         Calling this method with a list of covariates will set the model to use those instead.
         In addition, some simple transformations (ln() = natural log) are allowed.
         
         For example, to use ln(LDI) and education as covariates, use this syntax:
-            codmod.covariates(['education_yrs_pc','ln(LDI_pc)'])
+            codmod.set_covariates(['education_yrs_pc','ln(LDI_pc)'])
         '''
         self.covariate_list = []
         self.covariate_transformations = []
@@ -88,18 +107,8 @@ class codmod:
     def load(self):
         '''
         Loads codmod data from the MySQL server.
-        There should be a file .mysql.cnf in the same directory, formatted as such:
-            host = 'concrete.ihme.washington.edu'
-            db = 'codmod'
-            user = 'codmod'
-            passwd = 'password'
-        
         The resulting query will get all the data for a specified cause and sex, plus any covariates specified
         '''
-        mysql_opts = open('./mysql.cnf')
-        for l in mysql_opts:
-            exec l
-        mysql = MySQLdb.connect(host=host, db=db, user=user, passwd=passwd)
         sql = 'SELECT '
 
     def initialize_model(self, find_start_vals=True):
@@ -146,8 +155,10 @@ class codmod:
         # find indices for each subset
         regions = np.unique(self.data.region)
         r_index = [np.where(self.data.region==r) for r in regions]
+        r_list = range(len(regions))
         countries = np.unique(self.data.country)
         c_index = [np.where(self.data.country==c) for c in countries]
+        c_list = range(len(countries))
         years = range(self.year_range[0],self.year_range[1]+1)
         t_index = dict([(t, i) for i, t in enumerate(years)])
         ages = range(self.age_range[0],self.age_range[1]+1,5)
@@ -157,10 +168,10 @@ class codmod:
             ages = range(5,self.age_range[1]+1,5)
             ages.insert(0,1)
         a_index = dict([(a, i) for i, a in enumerate(ages)])
-        t_by_r = [[t_index[self.data.year[j]] for j in r_index[r][0]] for r in range(len(regions))]
-        a_by_r = [[a_index[self.data.age[j]] for j in r_index[r][0]] for r in range(len(regions))]
-        t_by_c = [[t_index[self.data.year[j]] for j in c_index[c][0]] for c in range(len(countries))]
-        a_by_c = [[a_index[self.data.age[j]] for j in c_index[c][0]] for c in range(len(countries))]	
+        t_by_r = [[t_index[self.data.year[j]] for j in r_index[r][0]] for r in r_list]
+        a_by_r = [[a_index[self.data.age[j]] for j in r_index[r][0]] for r in r_list]
+        t_by_c = [[t_index[self.data.year[j]] for j in c_index[c][0]] for c in c_list]
+        a_by_c = [[a_index[self.data.age[j]] for j in c_index[c][0]] for c in c_list]	
 
         # fixed-effect predictions
         @mc.deterministic
@@ -182,11 +193,11 @@ class codmod:
         # make variance-covariance matrices for the sampling grid
         @mc.deterministic
         def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
-            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
+            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
         @mc.deterministic
         def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
-            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
+            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
         # draw samples for each random effect matrix
         pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
@@ -196,7 +207,7 @@ class codmod:
         @mc.deterministic
         def pi_r(pi_samples=pi_r_samples):
             pi_r = np.zeros(self.data.shape[0])
-            for r in range(len(regions)):
+            for r in r_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
                 pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
                 pi_r[r_index[r]] = pi_r_grid[a_by_r[r],t_by_r[r]]
@@ -205,7 +216,7 @@ class codmod:
         @mc.deterministic
         def pi_c(pi_samples=pi_c_samples):
             pi_c = np.zeros(self.data.shape[0])
-            for c in range(len(countries)):
+            for c in c_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
                 pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
                 pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
@@ -228,9 +239,11 @@ class codmod:
             return mc.normal_like(value[i], mu[i], tau[i])
         
         # create a pickle backend to store the model
+        '''
         import time as tm
         dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + str(np.int(tm.time()))
         db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+        '''
 
         # MCMC step methods
         self.mod_mc = mc.MCMC(vars(), db=db)
@@ -238,9 +251,9 @@ class codmod:
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.beta)
         
         # use covariance matrix to seed adaptive metropolis steps
-        for r in range(len(regions)):
+        for r in r_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_r_samples[r], cov=np.array(C_r.value*.01))
-        for c in range(len(countries)):
+        for c in c_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
         
         # find good initial conditions with MAP approximation
@@ -252,7 +265,7 @@ class codmod:
             mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
             print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
 
-    def sample(self, iter=5000, burn=1000, thin=5, verbose=1):
+    def sample(self, iter=5000, burn=1000, thin=5, verbose=1, chains=1):
         '''
         Use MCMC to sample from the posterior
         '''

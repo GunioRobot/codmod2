@@ -53,8 +53,10 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
     # find indices for each subset
     regions = np.unique(data.region)
     r_index = [np.where(data.region==r) for r in regions]
+    r_list = range(len(regions)_
     countries = np.unique(data.country)
     c_index = [np.where(data.country==c) for c in countries]
+    c_list = range(len(countries))
     years = range(year_range[0],year_range[1]+1)
     t_index = dict([(t, i) for i, t in enumerate(years)])
     ages = range(age_range[0],age_range[1]+1,5)
@@ -64,10 +66,10 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
         ages = range(5,age_range[1]+1,5)
         ages.insert(0,1)
     a_index = dict([(a, i) for i, a in enumerate(ages)])
-    t_by_r = [[t_index[data.year[j]] for j in r_index[r][0]] for r in range(len(regions))]
-    a_by_r = [[a_index[data.age[j]] for j in r_index[r][0]] for r in range(len(regions))]
-    t_by_c = [[t_index[data.year[j]] for j in c_index[c][0]] for c in range(len(countries))]
-    a_by_c = [[a_index[data.age[j]] for j in c_index[c][0]] for c in range(len(countries))]	
+    t_by_r = [[t_index[data.year[j]] for j in r_index[r][0]] for r in r_list]
+    a_by_r = [[a_index[data.age[j]] for j in r_index[r][0]] for r in r_list]
+    t_by_c = [[t_index[data.year[j]] for j in c_index[c][0]] for c in c_list]
+    a_by_c = [[a_index[data.age[j]] for j in c_index[c][0]] for c in c_list]	
 
     # fixed-effect predictions
     @mc.deterministic
@@ -89,11 +91,11 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
     # make variance-covariance matrices for the sampling grid
     @mc.deterministic
     def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
-        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
+        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
     @mc.deterministic
     def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
-        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
+        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
     # draw samples for each random effect matrix
     pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
@@ -103,7 +105,7 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
     @mc.deterministic
     def pi_r(pi_samples=pi_r_samples):
         pi_r = np.zeros(data.shape[0])
-        for r in range(len(regions)):
+        for r in r_list:
             interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
             pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
             pi_r[r_index[r]] = pi_r_grid[a_by_r[r],t_by_r[r]]
@@ -112,7 +114,7 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
     @mc.deterministic
     def pi_c(pi_samples=pi_c_samples):
         pi_c = np.zeros(data.shape[0])
-        for c in range(len(countries)):
+        for c in c_list:
             interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
             pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
             pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
@@ -135,9 +137,11 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
         return mc.normal_like(value[i], mu[i], tau[i])
     
     # create a pickle backend to store the model
+    '''
     import time as tm
     dbname = '/tmp/codmod_' + str(np.int(tm.time()))
     db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+    '''
 
     # MCMC step methods
     #mod_mc = mc.MCMC(vars(), db=db)
@@ -145,9 +149,9 @@ def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.
     mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
     
     # use covariance matrix to seed adaptive metropolis steps
-    for r in range(len(regions)):
+    for r in r_list:
         mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.pi_r_samples[r], cov=np.array(C_r.value*.01))
-    for c in range(len(countries)):
+    for c in c_list:
         mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
     
     # return the whole object as a model

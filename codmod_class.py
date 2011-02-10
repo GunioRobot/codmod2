@@ -24,8 +24,17 @@ class codmod:
     '''
 
     def __init__(self, cause, sex):
+        '''
+        Specify cause (string like 'Aa02', 'Ab10', 'B142', 'C241', etc)
+        and sex (string like 'male' or 'female')
+        '''
         self.cause = cause
-        self.sex = sex
+        if (sex=='male'):
+            self.sex = 1
+        elif (sex=='female'):
+            self.sex = 2
+        else:
+            raise ValueError("Specify sex as either 'male' or 'female'")
         self.covariates()
         self.window()
         self.pi_samples()
@@ -43,6 +52,18 @@ class codmod:
         '''
         self.age_samples = age_samples
         self.year_samples = year_samples
+
+    def list_covariates(self):
+        '''
+        Return a list of which covariates are available for use in the model
+        '''
+        return covs
+
+    def list_causes(self):
+        '''
+        Return a list of cause codes with names
+        '''
+        return causes
 
     def covariates(self, covariate_list=['education_years_pc'], age_dummies=True):
         '''

@@ -1,181 +1,171 @@
 '''
 Author:	Kyle Foreman (w/ Abie Flaxman)
-Date:	04 February 2011
+Date:	09 February 2011
 '''
 
 import pymc as mc
 import pymc.gp as gp
 import numpy as np
+from scipy import interpolate
 
-def model(data):
-	''' Cause of death modelling with random effects correlated over space/time/age
+def model(data, sample_years=[1980.,1990.,2000.,2010.], sample_ages=[15.,25.,35.,45.], year_range=[1980,2010], age_range=[15,45]):
+    ''' Cause of death modelling with random effects correlated over space/time/age
 
-		Y_c,t,a = Beta*X_c,t,a + GP_r(t) + GP_r(a) + GP_c(t) + GP_c(a) + e_c,t,a
+        Y_c,t,a = beta*X_c,t,a + pi_r + pi_c + e_c,t,a
 
-			where	r: region
-					c: country
-					t: year
-					a: age
+            where	r: region
+                    c: country
+                    t: year
+                    a: age
 
-		Y_c,t,a	~ ln(cause-specific death rate)
+        Y_c,t,a		~ ln(cause-specific death rate)
 
-		Beta 		~ fixed effects (coefficients on covariates)
-					  Laplace with Mean = 0
-		X			~ covariates, by country/year/age
+        beta 		~ fixed effects (coefficients on covariates)
+                      Laplace with Mean = 0
+        X			~ covariates, by country/year/age
 
-		GP_r(t)		~ Gaussian Process random effect over time by region
-					  Mean = 0; Covariance = Exponential Euclidean over time
-		GP_r(a)		~ Gaussian Process random effect over age by region
-					  Mean = 0; Covariance = Exponential Euclidean over age
-		GP_c(t)		~ Gaussian Process random effect over time by country
-					  Mean = 0; Covariance = Exponential Euclidean over time
-		GP_c(a)		~ Gaussian Process random effect over age by country
-					  Mean = 0; Covariance = Exponential Euclidean over age
+        pi_r		~ 'random effect' by region
+                      a year*age grid of offsets
+                      calculated by sampling a few year/age pairs then interpolating
+        pi_c		~ 'random effect' by country
+                      a year*age grid of offsets
+                      calculated by sampling a few year/age pairs then interpolating
 
-		e_c,t,a 	~ Error
-					  N(0, sigma_e^2)
-	'''
+        e_c,t,a 	~ Error
+                      N(0, sigma_e^2)
+    '''
 
-	# make a matrix of covariates (plus an intercept)
-	k = len([n for n in data.dtype.names if n.startswith('x')])
-	X = np.vstack((np.ones(data.shape[0]),np.array([data['x%d'%i] for i in range(k)])))
+    # make a matrix of covariates (plus an intercept)
+    k = len([n for n in data.dtype.names if n.startswith('x')])
+    X = np.vstack((np.ones(data.shape[0]),np.array([data['x%d'%i] for i in range(k)])))
 
-	# priors
-	beta = mc.Laplace('beta', mu=0., tau=1., value=np.zeros(k+1))
-	sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
+    # prior on beta (covariate coefficients)
+    beta = mc.Laplace('beta', mu=0., tau=1., value=np.zeros(k+1))
+    # prior on sd of error term
+    sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
+    # priors on GP amplitudes
+    sigma_r = mc.Exponential('sigma_r', beta=2., value=2.)
+    sigma_c = mc.Exponential('sigma_c', beta=1., value=1.)
+    # priors on GP scales
+    tau_r = mc.Truncnorm('tau_r', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
+    tau_c = mc.Truncnorm('tau_c', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
 
-	# hyperpriors for GPs
-	sigma_f_rt = mc.Exponential('sigma_f_rt', beta=.5, value=.5)
-	tau_f_rt = mc.Truncnorm('tau_f_rt', mu=15., tau=5.**-2, a=5, b=25, value=15.)
-	sigma_f_ra = mc.Exponential('sigma_f_ra', beta=.5, value=.5)
-	tau_f_ra = mc.Truncnorm('tau_f_ra', mu=15., tau=5.**-2, a=0, b=80, value=15.)
-	sigma_f_ct = mc.Exponential('sigma_f_ct', beta=1., value=1.)
-	tau_f_ct = mc.Truncnorm('tau_f_ct', mu=15., tau=5.**-2, a=5, b=25, value=15.)
-	sigma_f_ca = mc.Exponential('sigma_f_ca', beta=1., value=1.)
-	tau_f_ca = mc.Truncnorm('tau_f_ca', mu=15., tau=5.**-2, a=0, b=80, value=15.)
-	
-	# find indices for each subset
-	regions = np.unique(data.region)
-	r_index = [np.where(data.region==r) for r in regions]
-	countries = np.unique(data.country)
-	c_index = [np.where(data.country==c) for c in countries]
-	years = np.unique(data.year)
-	t_index = dict([(t, i) for i, t in enumerate(years)])
-	ages = np.unique(data.age)
-	a_index = dict([(a, i) for i, a in enumerate(ages)])
-	
-	# fixed-effect predictions
-	@mc.deterministic
-	def fixed_effect(X=X, beta=beta):
-		'''fixed_effect_c,t,a = beta * X_c,t,a'''
-		return np.dot(beta, X)
+    # find indices for each subset
+    regions = np.unique(data.region)
+    r_index = [np.where(data.region==r) for r in regions]
+    countries = np.unique(data.country)
+    c_index = [np.where(data.country==c) for c in countries]
+    years = range(year_range[0],year_range[1]+1)
+    t_index = dict([(t, i) for i, t in enumerate(years)])
+    ages = range(age_range[0],age_range[1]+1,5)
+    if age_range[0] == 0:
+        ages.insert(1,1)
+    elif age_range[0] == 1:
+        ages = range(5,age_range[1]+1,5)
+        ages.insert(0,1)
+    a_index = dict([(a, i) for i, a in enumerate(ages)])
+    t_by_r = [[t_index[data.year[j]] for j in r_index[r][0]] for r in range(len(regions))]
+    a_by_r = [[a_index[data.age[j]] for j in r_index[r][0]] for r in range(len(regions))]
+    t_by_c = [[t_index[data.year[j]] for j in c_index[c][0]] for c in range(len(countries))]
+    a_by_c = [[a_index[data.age[j]] for j in c_index[c][0]] for c in range(len(countries))]	
 
-	# variance-covariance matrices for region GPs
-	@mc.deterministic
-	def C_rt(sigma_f=sigma_f_rt, tau_f=tau_f_rt, t=years):
-		return gp.exponential.euclidean(t, t, amp=sigma_f, scale=tau_f, symm=True)
-	@mc.deterministic
-	def C_ra(sigma_f=sigma_f_ra, tau_f=tau_f_ra, a=ages):
-		return gp.exponential.euclidean(a, a, amp=sigma_f, scale=tau_f, symm=True)
-		
-	# variance-covariance matrices for country GPs
-	@mc.deterministic
-	def C_ct(sigma_f=sigma_f_ct, tau_f=tau_f_ct, t=years):
-		return gp.exponential.euclidean(t, t, amp=sigma_f, scale=tau_f, symm=True)
-	@mc.deterministic
-	def C_ca(sigma_f=sigma_f_ca, tau_f=tau_f_ca, a=ages):
-		return gp.exponential.euclidean(a, a, amp=sigma_f, scale=tau_f, symm=True)
+    # fixed-effect predictions
+    @mc.deterministic
+    def fixed_effect(X=X, beta=beta):
+        '''fixed_effect_c,t,a = beta * X_c,t,a'''
+        return np.dot(beta, X)
 
-	# implement GPs as multivariate normals with appropriate covariance structure
-	GP_rt = [mc.MvNormalCov('GP_rt_%s'%r, np.zeros_like(years), C_rt, value=np.zeros_like(years)) for r in regions]
-	GP_ra = [mc.MvNormalCov('GP_ra_%s'%r, np.zeros_like(ages), C_ra, value=np.zeros_like(ages)) for r in regions]
-	GP_ct = [mc.MvNormalCov('GP_ct_%s'%c, np.zeros_like(years), C_ct, value=np.zeros_like(years)) for c in countries]
-	GP_ca = [mc.MvNormalCov('GP_ca_%s'%c, np.zeros_like(ages), C_ca, value=np.zeros_like(ages)) for c in countries]
-	
-	# GP predictions
-	@mc.deterministic
-	def GP_rt_pred(GP_rt=GP_rt):
-		GP_rt_pred = np.zeros(data.shape[0])
-		for r in range(len(regions)):
-			t = [t_index[data.year[j]] for j in r_index[r][0]]
-			GP_rt_pred[r_index[r]] = GP_rt[r][t]
-		return GP_rt_pred
-	
-	@mc.deterministic
-	def GP_ra_pred(GP_ra=GP_ra):
-		GP_ra_pred = np.zeros(data.shape[0])
-		for r in range(len(regions)):
-			a = [a_index[data.age[j]] for j in r_index[r][0]]
-			GP_ra_pred[r_index[r]] = GP_ra[r][a]
-		return GP_ra_pred
-	
-	@mc.deterministic
-	def GP_ct_pred(GP_ct=GP_ct):
-		GP_ct_pred = np.zeros(data.shape[0])
-		for c in range(len(countries)):
-			t = [t_index[data.year[j]] for j in c_index[c][0]]
-			GP_ct_pred[c_index[c]] = GP_ct[c][t]
-		return GP_ct_pred
-	
-	@mc.deterministic
-	def GP_ca_pred(GP_ca=GP_ca):
-		GP_ca_pred = np.zeros(data.shape[0])
-		for c in range(len(countries)):
-			a = [a_index[data.age[j]] for j in c_index[c][0]]
-			GP_ca_pred[c_index[c],:] = GP_ca[c][a]
-		return GP_ca_pred
+    # find all the points on which to evaluate the random effects grid
+    sample_points = []
+    for a in sample_ages:
+        for t in sample_years:
+            sample_points.append([a,t])
+    sample_points = np.array(sample_points)
 
-	# parameter predictions
-	@mc.deterministic
-	def param_pred(fixed_effect=fixed_effect, GP_rt_pred=GP_rt_pred, GP_ra_pred=GP_ra_pred, GP_ct_pred=GP_ct_pred, GP_ca_pred=GP_ca_pred):
-		return np.vstack([fixed_effect, GP_rt_pred, GP_ra_pred, GP_ct_pred, GP_ca_pred]).sum(axis=0)
+    # choose the degree for spline fitting (prefer cubic, but for undersampling pick smaller)
+    kx = 3 if len(sample_ages) > 3 else len(sample_ages)-1
+    ky = 3 if len(sample_years) > 3 else len(sample_years)-1
 
-	# data likelihood
-	@mc.deterministic
-	def tau_pred(sigma_e=sigma_e, var_d=data.se**2.):
-		return 1. / (sigma_e**2. + var_d)
+    # make variance-covariance matrices for the sampling grid
+    @mc.deterministic
+    def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
+        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
 
-	# observe the data
-	obs_index = np.where(np.isnan(data.y)==False)
-	@mc.observed
-	def data_likelihood(value=data.y, i=obs_index, mu=param_pred, tau=tau_pred):
-		return mc.normal_like(value[i], mu[i], tau[i])
-	
-	# create a pickle backend to store the model
-	import time as tm
-	dbname = '/tmp/codmod_' + str(np.int(tm.time()))
-	db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+    @mc.deterministic
+    def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
+        return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=1., symm=True)
 
-	# MCMC step methods
-	mod_mc = mc.MCMC(vars(), db=db)
-	mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
-	
-	# use covariance matrix to seed adaptive metropolis steps
-	for r in range(len(regions)):
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_rt[r], cov=np.array(C_rt.value*.01))
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ra[r], cov=np.array(C_ra.value*.01))
-	for c in range(len(countries)):
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ct[c], cov=np.array(C_ct.value*.01))
-		mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.GP_ca[c], cov=np.array(C_ca.value*.01))
-	
-	# return the whole object as a model
-	return mod_mc
+    # draw samples for each random effect matrix
+    pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
+    pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
+
+    # interpolate to create the complete random effect matrices, then convert into 1d arrays
+    @mc.deterministic
+    def pi_r(pi_samples=pi_r_samples):
+        pi_r = np.zeros(data.shape[0])
+        for r in range(len(regions)):
+            interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+            pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+            pi_r[r_index[r]] = pi_r_grid[a_by_r[r],t_by_r[r]]
+        return pi_r
+
+    @mc.deterministic
+    def pi_c(pi_samples=pi_c_samples):
+        pi_c = np.zeros(data.shape[0])
+        for c in range(len(countries)):
+            interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+            pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+            pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
+        return pi_c
+
+    # parameter predictions
+    @mc.deterministic
+    def param_pred(fixed_effect=fixed_effect, pi_r=pi_r, pi_c=pi_c):
+        return np.vstack([fixed_effect, pi_r, pi_c]).sum(axis=0)
+
+    # data likelihood
+    @mc.deterministic
+    def tau_pred(sigma_e=sigma_e, var_d=data.se**2.):
+        return 1. / (sigma_e**2. + var_d)
+
+    # observe the data
+    obs_index = np.where(np.isnan(data.y)==False)
+    @mc.observed
+    def data_likelihood(value=data.y, i=obs_index, mu=param_pred, tau=tau_pred):
+        return mc.normal_like(value[i], mu[i], tau[i])
+    
+    # create a pickle backend to store the model
+    import time as tm
+    dbname = '/tmp/codmod_' + str(np.int(tm.time()))
+    db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+
+    # MCMC step methods
+    #mod_mc = mc.MCMC(vars(), db=db)
+    mod_mc = mc.MCMC(vars(), db='ram')
+    mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.beta)
+    
+    # use covariance matrix to seed adaptive metropolis steps
+    for r in range(len(regions)):
+        mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.pi_r_samples[r], cov=np.array(C_r.value*.01))
+    for c in range(len(countries)):
+        mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
+    
+    # return the whole object as a model
+    return mod_mc
 
 def find_init_vals(mod_mc):
-	# find good initial conditions with MAP approximation
-	for var_list in [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]] + \
-		[[mod_mc.data_likelihood, rt] for rt in mod_mc.GP_rt] + \
-		[[mod_mc.data_likelihood, ra] for ra in mod_mc.GP_ra] + \
-		[[mod_mc.data_likelihood, ct] for ct in mod_mc.GP_ct] + \
-		[[mod_mc.data_likelihood, ca] for ca in mod_mc.GP_ca] + \
-		[[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]]:
-		print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-		mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-		print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-	return mod_mc
+    # find good initial conditions with MAP approximation
+    for var_list in [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]] + \
+        [[mod_mc.data_likelihood, r] for r in mod_mc.pi_r_samples] + \
+        [[mod_mc.data_likelihood, c] for c in mod_mc.pi_c_samples] + \
+        [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.sigma_e]]:
+        print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+        mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
+        print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
+    return mod_mc
 
 def sample(mod_mc, n=1000):
-	mod_mc.sample(n)
-	return mod_mc
+    mod_mc.sample(n)
+    return mod_mc
 
 

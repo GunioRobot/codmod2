@@ -67,11 +67,11 @@ cm_mod = codmod_grid.model(data)
 print('Model built', time.localtime())
 cm_init = codmod_grid.find_init_vals(cm_mod)
 print('MAP found', time.localtime())
-#cm_init.sample(iter=100, verbose=2)
-#print('Sampling complete', time.localtime())
+cm_init.sample(5000, 2000, 20, verbose=1)
+print('Sampling complete', time.localtime())
 
 
-'''
+
 # save the results
 import numpy.lib.recfunctions
 predicted_y = cm_init.param_pred.stats()['mean']
@@ -81,8 +81,7 @@ results = numpy.lib.recfunctions.append_fields(results, 'lower', lower_y)
 upper_y = cm_init.param_pred.stats()['95% HPD interval'][:,1]
 results = numpy.lib.recfunctions.append_fields(results, 'upper', upper_y)
 from pylab import rec2csv
-rec2csv(results, '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/asia_maternal_results.csv')
-'''
+rec2csv(results, '/home/j/Project/Causes of Death/CoDMod/pymc-space-time-model/all_maternal_results.csv')
 
 
 

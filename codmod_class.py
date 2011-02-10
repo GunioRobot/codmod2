@@ -30,14 +30,14 @@ class codmod:
         self.window()
         self.pi_samples()
 
-    def window(age_range=[0,80], year_range=[1980,2010]):
+    def window(self, age_range=[0,80], year_range=[1980,2010]):
         '''
         Change which year and age ranges the model predicts for
         '''
         self.age_range = age_range
         self.year_range = year_range
 
-    def pi_samples(age_samples=[0,1,15,25,40,55,65,80], year_samples=[1980,1990,2000,2010]):
+    def pi_samples(self, age_samples=[0,1,15,25,40,55,65,80], year_samples=[1980,1990,2000,2010]):
         '''
         Change which years and ages to sample pi (the random effect component) at
         '''
@@ -64,7 +64,7 @@ class codmod:
                 self.covariate_transformations.append('')
         self.age_dummies = age_dummies
 
-    def load():
+    def load(self):
         '''
         Loads codmod data from the MySQL server.
         There should be a file .mysql.cnf in the same directory, formatted as such:
@@ -81,7 +81,7 @@ class codmod:
         mysql = MySQLdb.connect(host=host, db=db, user=user, passwd=passwd)
         sql = 'SELECT '
 
-    def initialize_model(find_start_vals=True):
+    def initialize_model(self, find_start_vals=True):
         '''
         Y_c,t,a = beta*X_c,t,a + pi_r + pi_c + e_c,t,a
 

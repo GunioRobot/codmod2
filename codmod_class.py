@@ -5,29 +5,29 @@ Purpose:    Fit cause of death models over space, time, and age
 '''
 
 import pymc as mc
-import pymc.gp as gp
 import numpy as np
 import MySQLdb
 from scipy import interpolate
+import matplotlib as plot
 
 class codmod:
     '''
     codmod has the following methods:
 
-        window:     the range of ages/years to predict over
-        pi_samples: at what ages/years should pi (the random effect component) be sampled?
-        covariates: set which covariates to use in the model
-        load:       query the mysql database for the appropriate data
-        initialize: create the model object and find starting values via MAP
-        sample:     use MCMC to find posterior parameter estimates
-        predict:    use the parameter draws to calculate death rate estimates
+        set_window:         the range of ages/years to predict over
+        set_pi_samples:     at what ages/years should pi (the random effect component) be sampled?
+        set_covariates:     set which covariates to use in the model
+        list_causes:        lists the codmod causes available for easy reference
+        list_covariates:    lists the covariates available for easy reference
+        load:               query the mysql database for the appropriate data
+        initialize_model:   create the model object and find starting values via MAP
+        sample:             use MCMC to find posterior parameter estimates
+        predict:            use the parameter draws to calculate death rate estimates
     '''
 
+
     def __init__(self, cause, sex):
-        '''
-        Specify cause (string like 'Aa02', 'Ab10', 'B142', 'C241', etc)
-        and sex (string like 'male' or 'female')
-        '''
+        ''' Specify cause (string like 'Aa02', 'Ab10', 'B142', 'C241', etc) and sex ('male' or 'female') '''
         self.cause = cause
         if (sex=='male'):
             self.sex = 1
@@ -40,12 +40,14 @@ class codmod:
         self.set_window()
         self.set_pi_samples()
 
+
     def set_window(self, age_range=[0,80], year_range=[1980,2010]):
-        '''
-        Change which year and age ranges the model predicts for
-        '''
+        ''' Change which year and age ranges the model predicts for '''
         self.age_range = age_range
         self.year_range = year_range
+        print 'Age Range:', age_range
+        print 'Year Range:', year_range
+
 
     def connect(self):
         '''
@@ -63,26 +65,26 @@ class codmod:
         self.cursor = self.mysql.cursor()
         self.dcursor = self.mysql.cursor(cursorclass=MySQLdb.cursors.DictCursor)
 
+
     def set_pi_samples(self, age_samples=[0,1,15,25,40,55,65,80], year_samples=[1980,1990,2000,2010]):
-        '''
-        Change which years and ages to sample pi (the random effect component) at
-        '''
+        ''' Change which years and ages to sample pi (the random effect component) at '''
         self.age_samples = age_samples
         self.year_samples = year_samples
+        print 'Age Samples:', age_samples
+        print 'Year Samples:', year_samples
+
 
     def list_covariates(self):
-        '''
-        Return a list of which covariates are available for use in the model
-        '''
-        self.cursor.execute('SELECT variable_label,variable_name FROM covariate_list;')
+        ''' Return a list of which covariates are available for use in the model '''
+        self.cursor.execute('SELECT variable_name,variable_label FROM covariate_list;')
         return self.cursor.fetchall()
 
+
     def list_causes(self):
-        '''
-        Return a list mapping cause codes with names
-        '''
+        ''' Return a list mapping cause codes with names '''
         self.cursor.execute("SELECT cod_cause,cod_cause_name FROM cod_causes WHERE substr(cod_cause,length(cod_cause),1)!='x';")
         return self.cursor.fetchall()
+
 
     def set_covariates(self, covariate_list=['education_years_pc'], age_dummies=True):
         '''
@@ -93,16 +95,20 @@ class codmod:
         For example, to use ln(LDI) and education as covariates, use this syntax:
             codmod.set_covariates(['education_yrs_pc','ln(LDI_pc)'])
         '''
-        self.covariate_list = []
+        self.covariate_list = covariate_list
+        self.covariates_untransformed = []
         self.covariate_transformations = []
         for c in covariate_list:
             if c[0:3] == 'ln(':
-                self.covariate_list.append(c[3:len(c)-1])
+                self.covariates_untransformed.append(c[3:len(c)-1])
                 self.covariate_transformations.append('ln')
             else:
-                self.covariate_list.append(c)
+                self.covariates_untransformed.append(c)
                 self.covariate_transformations.append('')
         self.age_dummies = age_dummies
+        print 'Covariates:', covariate_list
+        print 'Age Dummies:', age_dummies
+
 
     def load(self):
         '''
@@ -110,6 +116,10 @@ class codmod:
         The resulting query will get all the data for a specified cause and sex, plus any covariates specified
         '''
         sql = 'SELECT '
+
+
+    def plot_data(self):
+        return something
 
     def initialize_model(self, find_start_vals=True):
         '''
@@ -136,7 +146,6 @@ class codmod:
         e_c,t,a 	~ Error
                       N(0, sigma_e^2)
         '''
-    
         # make a matrix of covariates (plus an intercept)
         k = len([n for n in self.data.dtype.names if n.startswith('x')])
         X = np.vstack((np.ones(self.data.shape[0]),np.array([self.data['x%d'%i] for i in range(k)])))
@@ -193,11 +202,11 @@ class codmod:
         # make variance-covariance matrices for the sampling grid
         @mc.deterministic
         def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
-            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
+            return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
         @mc.deterministic
         def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
-            return gp.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
+            return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
         # draw samples for each random effect matrix
         pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
@@ -265,10 +274,9 @@ class codmod:
             mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
             print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
 
+
     def sample(self, iter=5000, burn=1000, thin=5, verbose=1, chains=1):
-        '''
-        Use MCMC to sample from the posterior
-        '''
+        ''' Use MCMC to sample from the posterior '''
         self.mod_mc.sample(iter=iter, burn=burn, thin=thin, verbose=verbose)
 
 

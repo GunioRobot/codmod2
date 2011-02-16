@@ -198,14 +198,101 @@ class codmod:
         self.covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
 
         # load in death observations
-        deaths_sql = 'SELECT cf,envelope,pop,iso3,year,sex,age,sample_size FROM deaths_by_cause_tab WHERE cod_cause="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
+        deaths_sql = 'SELECT cf,envelope,pop,iso3,year,sex,age,sample_size,region FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
         print 'Loading death data...'
         self.death_obs = mysql_to_recarray(self.cursor, deaths_sql)
 
+        # remove observations in which the CF, pop, or envelope is missing, or CF is not within (0,1)
+        self.death_obs = np.delete(self.death_obs, np.where((np.isnan(self.death_obs.cf)) | (np.isnan(self.death_obs.pop)) | (np.isnan(self.death_obs.envelope)) | (self.death_obs.cf > 1) | (self.death_obs.cf < 0))[0], axis=0)
+
+        # set sample size to 10 when sample size is missing
+        self.death_obs.sample_size[np.where((np.isnan(self.death_obs.sample_size)) | (self.death_obs.sample_size < 10.))] = 10.
+
+        # apply a moving average (5 year window) on cause fractions of 0 or 1, or where sample size is less than 100
+        country_age_lookups = {}
+        for c in np.unique(self.death_obs.iso3):
+            for a in np.unique(self.death_obs.age):
+                country_age_lookups[c+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.iso3 == c))[0]
+        year_window_lookups = {}
+        for y in range(self.year_range[0],self.year_range[1]+1):
+            year_window_lookups[y] = np.where((self.death_obs.year >= y-2.) & (self.death_obs.year <= y+2.))[0]
+        smooth_me = np.where((self.death_obs.cf==0.) | (self.death_obs.cf==1.) | (self.death_obs.sample_size<100.))[0]
+        for i in smooth_me:
+            self.death_obs.cf[i] = self.death_obs.cf[np.intersect1d(country_age_lookups[self.death_obs.iso3[i]+str(self.death_obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
+
+        # for cases in which the CF is still 0 or 1 after the moving average, use the smallest/largest non-0/1 CF observed in that region-age
+        region_age_lookups = {}
+        for r in np.unique(self.death_obs.region):
+            for a in np.unique(self.death_obs.age):
+                region_age_lookups[str(r)+'_'+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.region == r))[0]
+        nonzeros = np.where(self.death_obs.cf>0)[0]
+        nonones = np.where(self.death_obs.cf<1)[0]
+        for i in np.where(self.death_obs.cf==0.)[0]:
+            candidates = np.intersect1d(region_age_lookups[str(self.death_obs.region[i])+'_'+str(self.death_obs.age[i])], nonzeros)
+            if candidates.shape[0] == 0:
+                self.death_obs.cf[i] = 0.
+            else:
+                self.death_obs.cf[i] = self.death_obs.cf[candidates].min()
+        for i in np.where(self.death_obs.cf==1.)[0]:
+            candidates = np.intersect1d(region_age_lookups[str(self.death_obs.region[i])+'_'+str(self.death_obs.age[i])], nonones)
+            if candidates.shape[0] == 0:
+                self.death_obs.cf[i] = 1.
+            else:
+                self.death_obs.cf[i] = self.death_obs.cf[candidates].max()
+
+        # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
+        self.death_obs = np.delete(self.death_obs, np.where((self.death_obs.cf == 0.) | (self.death_obs.cf == 1.))[0], axis=0)
+
+        # y is the log of the death rate
+        y = np.log(self.death_obs.cf * self.death_obs.envelope / self.death_obs.pop)
+
+        # to get a standard deviation on y, we'll use the sample size and cf in a random binomial to come up with simulations
+        death_draws = np.random.binomial(self.death_obs.sample_size.astype(np.int), self.death_obs.cf, (100, self.death_obs.sample_size.shape[0])).T.astype(np.float)
+        death_draws = np.ma.masked_equal(death_draws, 0.).astype(np.float)
+        y_draws = np.empty_like(death_draws)        
+        for i in range(100):
+            y_draws[:,i] = np.log((death_draws[:,i] / self.death_obs.sample_size.astype(np.float)) * (self.death_obs.envelope / self.death_obs.pop.astype(np.float)))
+        sd = y_draws.std(axis=1)
+
+        # in cases where the standard deviation is 0 (typically because mostly zeroes are drawn, and thus there's virtually no SD)
+        
+        # hmmm, what ends up happening here is that a place with a very low CF and low sample size almost always draws zero, occasionally 1.... so it has no SD
+        # this isn't the behavior we want. maybe log rates aren't the way to go? or at least we should not calculate SD and instead use sample size in the likelihood?
+        
+        sd[np.where(sd==0.)]
+        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, sd], names=['iso3','year','age','sex','y','sd'])
+        self.obs = obs
+        self.yd = y_draws
+
+        
+        
+        
+        ''' 
+        # TEMPORARILY remove 0s/1s
+        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.cf) == False)]
+        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.envelope) == False)]
+        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.pop) == False)]
+        self.death_obs = self.death_obs[np.where(self.death_obs.cf < 1)]
+        self.death_obs = self.death_obs[np.where(self.death_obs.cf > 0)]
+        self.death_obs.sample_size[np.where(np.isnan(self.death_obs.sample_size))] = 10
+        self.death_obs.sample_size[np.where(self.death_obs.sample_size <= 10)] = 10
+
+        # prep the observations into the right format
+        y = np.log(self.death_obs.cf*self.death_obs.envelope/self.death_obs.pop)
+        death_draws = np.random.binomial(self.death_obs.sample_size.astype(np.int), self.death_obs.cf, (100, self.death_obs.sample_size.shape[0])).T
+        death_draws = np.ma.masked_equal(death_draws.astype(np.float), 0.).astype(np.float)
+        self.dd = death_draws
+        y_draws = np.empty_like(death_draws.astype(np.float))
+        for i in range(100):
+            y_draws[:,i] = np.log((death_draws[:,i] / self.death_obs.sample_size.astype(np.float)) * (self.death_obs.envelope / self.death_obs.pop.astype(np.float)))
+        sd = y_draws.std(axis=1)
+        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, sd], names=['iso3','year','age','sex','y','sd'])
+
         # prep all the in-sample data
-        self.training_data = rec_join(['iso3','year','age','sex'], self.death_obs, self.covariate_matrix)
+        self.training_data = rec_join(['iso3','year','age','sex'], obs, self.covariate_matrix)
         self.data_rows = self.training_data.shape[0]
         print 'Data Rows:', self.data_rows
+        '''
 
 
     def plot_data(self, iso3=''):

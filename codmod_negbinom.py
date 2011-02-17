@@ -1,6 +1,6 @@
 '''
 Author:	    Kyle Foreman
-Date:	    10 February 2011
+Date:	    16 February 2011
 Purpose:    Fit cause of death models over space, time, and age
 '''
 
@@ -165,8 +165,8 @@ class codmod:
         covariate_data = mysql_to_recarray(self.cursor, cov_sql)        
 
         # make covariate matrix (including transformations and normalization)
-        covariate_vectors = [covariate_data.iso3, covariate_data.region, covariate_data.year, covariate_data.age, covariate_data.sex, np.ones(covariate_data.shape[0])]
-        covariate_names = ['iso3', 'region', 'year', 'age', 'sex', 'x0']
+        covariate_vectors = [covariate_data.iso3, covariate_data.region, covariate_data.super_region, covariate_data.year, covariate_data.age, covariate_data.sex, np.ones(covariate_data.shape[0])]
+        covariate_names = ['iso3', 'region', 'super_region', 'year', 'age', 'sex', 'x0']
         self.covariate_dict = {'x0': 'constant'}
         for i in range(len(self.covariate_list)):
             j = covariate_data[self.covariates_untransformed[i]]
@@ -199,12 +199,12 @@ class codmod:
         self.covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
 
         # load in death observations
-        deaths_sql = 'SELECT cf,envelope,pop,iso3,year,sex,age,sample_size,region FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
+        deaths_sql = 'SELECT cf,iso3,year,sex,age,sample_size,region,envelope,pop FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
         print 'Loading death data...'
         self.death_obs = mysql_to_recarray(self.cursor, deaths_sql)
 
-        # remove observations in which the CF, pop, or envelope is missing, or CF is not within (0,1)
-        self.death_obs = np.delete(self.death_obs, np.where((np.isnan(self.death_obs.cf)) | (np.isnan(self.death_obs.pop)) | (np.isnan(self.death_obs.envelope)) | (self.death_obs.cf > 1) | (self.death_obs.cf < 0))[0], axis=0)
+        # remove observations in which the CF is missing or not within (0,1)
+        self.death_obs = np.delete(self.death_obs, np.where((np.isnan(self.death_obs.cf)) | (self.death_obs.cf > 1) | (self.death_obs.cf < 0))[0], axis=0)
 
         # set sample size to 10 when sample size is missing
         self.death_obs.sample_size[np.where((np.isnan(self.death_obs.sample_size)) | (self.death_obs.sample_size < 10.))] = 10.
@@ -244,56 +244,14 @@ class codmod:
         # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
         self.death_obs = np.delete(self.death_obs, np.where((self.death_obs.cf == 0.) | (self.death_obs.cf == 1.))[0], axis=0)
 
-        # y is the log of the death rate
-        y = np.log(self.death_obs.cf * self.death_obs.envelope / self.death_obs.pop)
-
-        # to get a standard deviation on y, we'll use the sample size and cf in a random binomial to come up with simulations
-        death_draws = np.random.binomial(self.death_obs.sample_size.astype(np.int), self.death_obs.cf, (100, self.death_obs.sample_size.shape[0])).T.astype(np.float)
-        death_draws = np.ma.masked_equal(death_draws, 0.).astype(np.float)
-        y_draws = np.empty_like(death_draws)        
-        for i in range(100):
-            y_draws[:,i] = np.log((death_draws[:,i] / self.death_obs.sample_size.astype(np.float)) * (self.death_obs.envelope / self.death_obs.pop.astype(np.float)))
-        sd = y_draws.std(axis=1)
-
-        # in cases where the standard deviation is 0 (typically because mostly zeroes are drawn, and thus there's virtually no SD)
-        
-        # hmmm, what ends up happening here is that a place with a very low CF and low sample size almost always draws zero, occasionally 1.... so it has no SD
-        # this isn't the behavior we want. maybe log rates aren't the way to go? or at least we should not calculate SD and instead use sample size in the likelihood?
-        
-        sd[np.where(sd==0.)]
-        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, sd], names=['iso3','year','age','sex','y','sd'])
-        self.obs = obs
-        self.yd = y_draws
-
-        
-        
-        
-        ''' 
-        # TEMPORARILY remove 0s/1s
-        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.cf) == False)]
-        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.envelope) == False)]
-        self.death_obs = self.death_obs[np.where(np.isnan(self.death_obs.pop) == False)]
-        self.death_obs = self.death_obs[np.where(self.death_obs.cf < 1)]
-        self.death_obs = self.death_obs[np.where(self.death_obs.cf > 0)]
-        self.death_obs.sample_size[np.where(np.isnan(self.death_obs.sample_size))] = 10
-        self.death_obs.sample_size[np.where(self.death_obs.sample_size <= 10)] = 10
-
-        # prep the observations into the right format
-        y = np.log(self.death_obs.cf*self.death_obs.envelope/self.death_obs.pop)
-        death_draws = np.random.binomial(self.death_obs.sample_size.astype(np.int), self.death_obs.cf, (100, self.death_obs.sample_size.shape[0])).T
-        death_draws = np.ma.masked_equal(death_draws.astype(np.float), 0.).astype(np.float)
-        self.dd = death_draws
-        y_draws = np.empty_like(death_draws.astype(np.float))
-        for i in range(100):
-            y_draws[:,i] = np.log((death_draws[:,i] / self.death_obs.sample_size.astype(np.float)) * (self.death_obs.envelope / self.death_obs.pop.astype(np.float)))
-        sd = y_draws.std(axis=1)
-        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, sd], names=['iso3','year','age','sex','y','sd'])
+        # y is the observed number of deaths
+        y = self.death_obs.cf * self.death_obs.sample_size
+        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, self.death_obs.envelope, self.death_obs.pop], names=['iso3','year','age','sex','y','envelope','pop'])
 
         # prep all the in-sample data
         self.training_data = rec_join(['iso3','year','age','sex'], obs, self.covariate_matrix)
         self.data_rows = self.training_data.shape[0]
         print 'Data Rows:', self.data_rows
-        '''
 
 
     def plot_data(self, iso3=''):
@@ -303,45 +261,59 @@ class codmod:
 
     def initialize_model(self, find_start_vals=True):
         '''
-        Y_c,t,a = beta*X_c,t,a + pi_r + pi_c + e_c,t,a
-
-            where	r: region
+        Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
+        
+            where	s: super-region
+                    r: region
                     c: country
                     t: year
                     a: age
 
-        Y_c,t,a		~ ln(cause-specific death rate)
+            Y_c,t,a		~ observed deaths due to a cause in a country/year/age/sex
+            
+            mu_c,t,a    ~ exp(beta*X_c,t,a + ln(E) + pi_s + pi_r + pi_c + e_c,t,a)
+            
+                        beta    ~ fixed effects (coefficients on covariates)
+                                  Laplace with Mean = 0
+                        X_c,t,a ~ covariates (by country/year/age)
+                        
+                        E       ~ exposure (total number of all-cause deaths observed)
+                        
+                        pi_s    ~ 'random effect' by super-region
+                                  year*age grid of offsets
+                                  sampled from MVN with matern covariance then interpolated via cubic spline
+                        pi_r    ~ 'random effect' by region
+                                  year*age grid of offsets
+                                  sampled from MVN with matern covariance then interpolated via cubic spline
+                        pi_c    ~ 'random effect' by country
+                                  year*age grid of offsets
+                                  sampled from MVN with matern covariance then interpolated via cubic spline
 
-        beta 		~ fixed effects (coefficients on covariates)
-                      Laplace with Mean = 0
-        X			~ covariates, by country/year/age
-
-        pi_r		~ 'random effect' by region
-                      a year*age grid of offsets
-                      calculated by sampling a few year/age pairs then interpolating via cubic spline
-        pi_c		~ 'random effect' by country
-                      a year*age grid of offsets
-                      calculated by sampling a few year/age pairs then interpolating
-
-        e_c,t,a 	~ Error
-                      N(0, sigma_e^2)
+                        e_c,t,a ~ error
+                        
+            alpha       ~ overdispersion parameter
         '''
-        # make a matrix of covariates (plus an intercept)
+        # make a matrix of covariates
         k = len([n for n in self.data.dtype.names if n.startswith('x')])
-        X = np.vstack((np.ones(self.data.shape[0]),np.array([self.data['x%d'%i] for i in range(k)])))
+        X = np.array([self.data['x%d'%i] for i in range(k)])
 
         # prior on beta (covariate coefficients)
-        beta = mc.Laplace('beta', mu=0., tau=1., value=np.zeros(k+1))
-        # prior on sd of error term
-        sigma_e = mc.Exponential('sigma_e', beta=1., value=1.)
-        # priors on GP amplitudes
-        sigma_r = mc.Exponential('sigma_r', beta=2., value=2.)
-        sigma_c = mc.Exponential('sigma_c', beta=1., value=1.)
-        # priors on GP scales
-        tau_r = mc.Truncnorm('tau_r', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
-        tau_c = mc.Truncnorm('tau_c', mu=15., tau=5.**-2, a=5, b=np.Inf, value=15.)
+        beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.zeros(k))
+        # prior on alpha (overdispersion parameter)
+        alpha = mc.Exponential('alpha', beta=1.0, value=1.0)
+        # priors on matern amplitudes
+        sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
+        sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)
+        sigma_c = mc.Exponential('sigma_c', beta=1.0, value=1.0)
+        # priors on matern scales
+        tau_s = mc.Truncnorm('tau_s', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
+        tau_r = mc.Truncnorm('tau_r', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
+        tau_c = mc.Truncnorm('tau_c', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
 
         # find indices for each subset
+        super_regions = np.unique(self.data.super_region)
+        s_index = [np.where(self.data.super_region==s) for s in super_regions]
+        s_list = range(len(super_regions))
         regions = np.unique(self.data.region)
         r_index = [np.where(self.data.region==r) for r in regions]
         r_list = range(len(regions))
@@ -357,6 +329,8 @@ class codmod:
             ages = range(5,self.age_range[1]+1,5)
             ages.insert(0,1)
         a_index = dict([(a, i) for i, a in enumerate(ages)])
+        t_by_s = [[t_index[self.data.year[j]] for j in s_index[s][0]] for s in s_list]
+        a_by_s = [[a_index[self.data.age[j]] for j in s_index[s][0]] for s in s_list]
         t_by_r = [[t_index[self.data.year[j]] for j in r_index[r][0]] for r in r_list]
         a_by_r = [[a_index[self.data.age[j]] for j in r_index[r][0]] for r in r_list]
         t_by_c = [[t_index[self.data.year[j]] for j in c_index[c][0]] for c in c_list]
@@ -381,6 +355,10 @@ class codmod:
 
         # make variance-covariance matrices for the sampling grid
         @mc.deterministic
+        def C_s(s=sample_points, sigma=sigma_s, tau=tau_s):
+            return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
+
+        @mc.deterministic
         def C_r(s=sample_points, sigma=sigma_r, tau=tau_r):
             return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
@@ -389,10 +367,20 @@ class codmod:
             return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
         # draw samples for each random effect matrix
+        pi_s_samples = [mc.MvNormalCov('pi_s_%s'%s, np.zeros(sample_points.shape[0]), C_s, value=np.zeros(sample_points.shape[0])) for s in super_regions]
         pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
         pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
+        @mc.deterministic
+        def pi_s(pi_samples=pi_s_samples):
+            pi_s = np.zeros(self.data.shape[0])
+            for s in s_list:
+                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[s], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+                pi_s_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+                pi_s[s_index[s]] = pi_s_grid[a_by_s[s],t_by_s[s]]
+            return pi_s
+
         @mc.deterministic
         def pi_r(pi_samples=pi_r_samples):
             pi_r = np.zeros(self.data.shape[0])
@@ -413,19 +401,13 @@ class codmod:
 
         # parameter predictions
         @mc.deterministic
-        def param_pred(fixed_effect=fixed_effect, pi_r=pi_r, pi_c=pi_c):
-            return np.vstack([fixed_effect, pi_r, pi_c]).sum(axis=0)
-
-        # data likelihood
-        @mc.deterministic
-        def tau_pred(sigma_e=sigma_e, var_d=self.data.se**2.):
-            return 1. / (sigma_e**2. + var_d)
+        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=self.data.sample_size):
+            return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
-        obs_index = np.where(np.isnan(self.data.y)==False)
         @mc.observed
-        def data_likelihood(value=self.data.y, i=obs_index, mu=param_pred, tau=tau_pred):
-            return mc.normal_like(value[i], mu[i], tau[i])
+        def data_likelihood(value=self.data.y, i=obs_index, mu=param_pred, alpha=alpha):
+            return mc.negative_binomial_like(value[i], mu[i], alpha)
 
         # create a pickle backend to store the model
         import time as tm
@@ -438,6 +420,8 @@ class codmod:
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.beta)
         
         # use covariance matrix to seed adaptive metropolis steps
+        for s in s_list:
+            self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_s_samples[s], cov=np.array(C_s.value*.01))
         for r in r_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_r_samples[r], cov=np.array(C_r.value*.01))
         for c in c_list:
@@ -445,6 +429,7 @@ class codmod:
         
         # find good initial conditions with MAP approximation
         for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.sigma_e]] + \
+            [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
             [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
             [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
             [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.sigma_e]]:

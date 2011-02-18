@@ -10,7 +10,6 @@ import MySQLdb
 from scipy import interpolate
 from pymc.Matplot import plot as mcplot
 import matplotlib as plot
-from matplotlib.mlab import rec_join
 import numpy.lib.recfunctions as recfunctions
 
 class codmod:
@@ -201,7 +200,7 @@ class codmod:
                     covariate_vectors.append(np.array(covariate_data.age==a).astype(np.float))
                     covariate_names.append('x' + str(len(self.covariate_list)+i))
                     self.covariate_dict['x' + str(len(self.covariate_list)+i)] = 'Age ' + str(a)
-        self.covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
+        covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
 
         # load in death observations
         deaths_sql = 'SELECT cf,iso3 AS country,year,sex,age,sample_size,region,envelope,pop FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
@@ -254,9 +253,36 @@ class codmod:
         obs = np.core.records.fromarrays([self.death_obs.country, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, self.death_obs.envelope, self.death_obs.pop, self.death_obs.sample_size], names=['country','year','age','sex','y','envelope','pop','sample_size'])
 
         # prep all the in-sample data
-        self.training_data = rec_join(['country','year','age','sex'], obs, self.covariate_matrix)
-        self.data_rows = self.training_data.shape[0]
+        print obs.shape
+        self.in_sample_data = recfunctions.join_by(['country','year','age','sex'], obs, covariate_matrix, jointype='inner') 
+        self.training_data = self.in_sample_data
+        self.data_rows = self.in_sample_data.shape[0]
         print 'Data Rows:', self.data_rows
+
+        # prep the complete data series (all covariate observations, plus death observations where available)
+        self.all_data = recfunctions.join_by(['country','year','age','sex'], covariate_matrix, obs, jointype='leftouter')
+
+
+    def training_split(self, holdout_unit='datapoint', holdout_prop=.2):
+        ''' Splits the data up into test and train subsets '''
+        if holdout_prop > .99 or holdout_prop < .01:
+            raise ValueError('The holdout proportion must be between .1 and .99.')
+        if holdout_unit == 'datapoint':
+            data_flagged = recfunctions.append_fields(self.in_sample_data, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
+            self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
+            self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+        elif holdout_unit == 'country':
+            countries = np.unique(self.in_sample_data.country)
+            self.countries = countries
+            holdouts = np.core.records.fromarrays([countries, np.random.binomial(1, holdout_prop, len(countries))], names=['country','holdout'])
+            self.holdouts = holdouts
+            data_flagged = recfunctions.join_by(['country'], self.in_sample_data, holdouts, 'leftouter')
+            self.data_flagged = data_flagged
+            self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
+            self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+        else:
+            raise ValueError("The holdout unit must be either 'datapoint' or 'country'.")
+        
 
 
     def plot_data(self, country=''):
@@ -305,7 +331,7 @@ class codmod:
         # prior on beta (covariate coefficients)
         beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.zeros(k))
         # prior on alpha (overdispersion parameter)
-        alpha = mc.Exponential('alpha', beta=1.0, value=1.0)
+        alpha = mc.Exponential('alpha', beta=2.0, value=2.0)
         # priors on matern amplitudes
         sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
         sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)

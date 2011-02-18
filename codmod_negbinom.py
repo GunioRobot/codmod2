@@ -160,13 +160,13 @@ class codmod:
         for i in list(set(self.covariates_untransformed)):
             if i != 'year':
                 covs = covs + i + ','
-        cov_sql = 'SELECT iso3,region,age,year,sex,' + covs[0:-1] + ' FROM all_covariates WHERE sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
+        cov_sql = 'SELECT iso3 AS country,region,super_region,age,year,sex,' + covs[0:-1] + ' FROM all_covariates WHERE sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
         print 'Loading covariates...'
         covariate_data = mysql_to_recarray(self.cursor, cov_sql)        
 
         # make covariate matrix (including transformations and normalization)
-        covariate_vectors = [covariate_data.iso3, covariate_data.region, covariate_data.super_region, covariate_data.year, covariate_data.age, covariate_data.sex, np.ones(covariate_data.shape[0])]
-        covariate_names = ['iso3', 'region', 'super_region', 'year', 'age', 'sex', 'x0']
+        covariate_vectors = [covariate_data.country, covariate_data.region, covariate_data.super_region, covariate_data.year, covariate_data.age, covariate_data.sex, np.ones(covariate_data.shape[0])]
+        covariate_names = ['country', 'region', 'super_region', 'year', 'age', 'sex', 'x0']
         self.covariate_dict = {'x0': 'constant'}
         for i in range(len(self.covariate_list)):
             j = covariate_data[self.covariates_untransformed[i]]
@@ -199,7 +199,7 @@ class codmod:
         self.covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
 
         # load in death observations
-        deaths_sql = 'SELECT cf,iso3,year,sex,age,sample_size,region,envelope,pop FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
+        deaths_sql = 'SELECT cf,iso3 AS country,year,sex,age,sample_size,region,envelope,pop FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
         print 'Loading death data...'
         self.death_obs = mysql_to_recarray(self.cursor, deaths_sql)
 
@@ -211,15 +211,15 @@ class codmod:
 
         # apply a moving average (5 year window) on cause fractions of 0 or 1, or where sample size is less than 100
         country_age_lookups = {}
-        for c in np.unique(self.death_obs.iso3):
+        for c in np.unique(self.death_obs.country):
             for a in np.unique(self.death_obs.age):
-                country_age_lookups[c+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.iso3 == c))[0]
+                country_age_lookups[c+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.country == c))[0]
         year_window_lookups = {}
         for y in range(self.year_range[0],self.year_range[1]+1):
             year_window_lookups[y] = np.where((self.death_obs.year >= y-2.) & (self.death_obs.year <= y+2.))[0]
         smooth_me = np.where((self.death_obs.cf==0.) | (self.death_obs.cf==1.) | (self.death_obs.sample_size<100.))[0]
         for i in smooth_me:
-            self.death_obs.cf[i] = self.death_obs.cf[np.intersect1d(country_age_lookups[self.death_obs.iso3[i]+str(self.death_obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
+            self.death_obs.cf[i] = self.death_obs.cf[np.intersect1d(country_age_lookups[self.death_obs.country[i]+str(self.death_obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
 
         # for cases in which the CF is still 0 or 1 after the moving average, use the smallest/largest non-0/1 CF observed in that region-age
         region_age_lookups = {}
@@ -246,16 +246,16 @@ class codmod:
 
         # y is the observed number of deaths
         y = self.death_obs.cf * self.death_obs.sample_size
-        obs = np.core.records.fromarrays([self.death_obs.iso3, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, self.death_obs.envelope, self.death_obs.pop], names=['iso3','year','age','sex','y','envelope','pop'])
+        obs = np.core.records.fromarrays([self.death_obs.country, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, self.death_obs.envelope, self.death_obs.pop, self.death_obs.sample_size], names=['country','year','age','sex','y','envelope','pop','sample_size'])
 
         # prep all the in-sample data
-        self.training_data = rec_join(['iso3','year','age','sex'], obs, self.covariate_matrix)
+        self.training_data = rec_join(['country','year','age','sex'], obs, self.covariate_matrix)
         self.data_rows = self.training_data.shape[0]
         print 'Data Rows:', self.data_rows
 
 
-    def plot_data(self, iso3=''):
-        if iso3:
+    def plot_data(self, country=''):
+        if country:
             return something
 
 
@@ -294,8 +294,8 @@ class codmod:
             alpha       ~ overdispersion parameter
         '''
         # make a matrix of covariates
-        k = len([n for n in self.data.dtype.names if n.startswith('x')])
-        X = np.array([self.data['x%d'%i] for i in range(k)])
+        k = len([n for n in self.training_data.dtype.names if n.startswith('x')])
+        X = np.array([self.training_data['x%d'%i] for i in range(k)])
 
         # prior on beta (covariate coefficients)
         beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.zeros(k))
@@ -311,14 +311,14 @@ class codmod:
         tau_c = mc.Truncnorm('tau_c', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
 
         # find indices for each subset
-        super_regions = np.unique(self.data.super_region)
-        s_index = [np.where(self.data.super_region==s) for s in super_regions]
+        super_regions = np.unique(self.training_data.super_region)
+        s_index = [np.where(self.training_data.super_region==s) for s in super_regions]
         s_list = range(len(super_regions))
-        regions = np.unique(self.data.region)
-        r_index = [np.where(self.data.region==r) for r in regions]
+        regions = np.unique(self.training_data.region)
+        r_index = [np.where(self.training_data.region==r) for r in regions]
         r_list = range(len(regions))
-        countries = np.unique(self.data.country)
-        c_index = [np.where(self.data.country==c) for c in countries]
+        countries = np.unique(self.training_data.country)
+        c_index = [np.where(self.training_data.country==c) for c in countries]
         c_list = range(len(countries))
         years = range(self.year_range[0],self.year_range[1]+1)
         t_index = dict([(t, i) for i, t in enumerate(years)])
@@ -329,12 +329,12 @@ class codmod:
             ages = range(5,self.age_range[1]+1,5)
             ages.insert(0,1)
         a_index = dict([(a, i) for i, a in enumerate(ages)])
-        t_by_s = [[t_index[self.data.year[j]] for j in s_index[s][0]] for s in s_list]
-        a_by_s = [[a_index[self.data.age[j]] for j in s_index[s][0]] for s in s_list]
-        t_by_r = [[t_index[self.data.year[j]] for j in r_index[r][0]] for r in r_list]
-        a_by_r = [[a_index[self.data.age[j]] for j in r_index[r][0]] for r in r_list]
-        t_by_c = [[t_index[self.data.year[j]] for j in c_index[c][0]] for c in c_list]
-        a_by_c = [[a_index[self.data.age[j]] for j in c_index[c][0]] for c in c_list]	
+        t_by_s = [[t_index[self.training_data.year[j]] for j in s_index[s][0]] for s in s_list]
+        a_by_s = [[a_index[self.training_data.age[j]] for j in s_index[s][0]] for s in s_list]
+        t_by_r = [[t_index[self.training_data.year[j]] for j in r_index[r][0]] for r in r_list]
+        a_by_r = [[a_index[self.training_data.age[j]] for j in r_index[r][0]] for r in r_list]
+        t_by_c = [[t_index[self.training_data.year[j]] for j in c_index[c][0]] for c in c_list]
+        a_by_c = [[a_index[self.training_data.age[j]] for j in c_index[c][0]] for c in c_list]	
 
         # fixed-effect predictions
         @mc.deterministic
@@ -344,14 +344,14 @@ class codmod:
 
         # find all the points on which to evaluate the random effects grid
         sample_points = []
-        for a in self.sample_ages:
-            for t in self.sample_years:
+        for a in self.age_samples:
+            for t in self.year_samples:
                 sample_points.append([a,t])
         sample_points = np.array(sample_points)
 
         # choose the degree for spline fitting (prefer cubic, but for undersampling pick smaller)
-        kx = 3 if len(self.sample_ages) > 3 else len(self.sample_ages)-1
-        ky = 3 if len(self.sample_years) > 3 else len(self.sample_years)-1
+        kx = 3 if len(self.age_samples) > 3 else len(self.age_samples)-1
+        ky = 3 if len(self.year_samples) > 3 else len(self.year_samples)-1
 
         # make variance-covariance matrices for the sampling grid
         @mc.deterministic
@@ -374,7 +374,7 @@ class codmod:
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
         @mc.deterministic
         def pi_s(pi_samples=pi_s_samples):
-            pi_s = np.zeros(self.data.shape[0])
+            pi_s = np.zeros(self.training_data.shape[0])
             for s in s_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[s], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
                 pi_s_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
@@ -383,7 +383,7 @@ class codmod:
 
         @mc.deterministic
         def pi_r(pi_samples=pi_r_samples):
-            pi_r = np.zeros(self.data.shape[0])
+            pi_r = np.zeros(self.training_data.shape[0])
             for r in r_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
                 pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
@@ -392,7 +392,7 @@ class codmod:
 
         @mc.deterministic
         def pi_c(pi_samples=pi_c_samples):
-            pi_c = np.zeros(self.data.shape[0])
+            pi_c = np.zeros(self.training_data.shape[0])
             for c in c_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
                 pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
@@ -401,13 +401,13 @@ class codmod:
 
         # parameter predictions
         @mc.deterministic
-        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=self.data.sample_size):
+        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=self.training_data.sample_size):
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
         @mc.observed
-        def data_likelihood(value=self.data.y, i=obs_index, mu=param_pred, alpha=alpha):
-            return mc.negative_binomial_like(value[i], mu[i], alpha)
+        def data_likelihood(value=self.training_data.y, mu=param_pred, alpha=alpha):
+            return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
         import time as tm
@@ -428,11 +428,11 @@ class codmod:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
         
         # find good initial conditions with MAP approximation
-        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.sigma_e]] + \
+        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta]] + \
             [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
             [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
             [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
-            [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.sigma_e]]:
+            [[self.mod_mc.data_likelihood, self.mod_mc.beta]]:
             print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
             mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
             print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])

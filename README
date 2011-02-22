@@ -1,22 +1,22 @@
 
 Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
-        
-    where	s: super-region
+
+    where   s: super-region
             r: region
             c: country
             t: year
             a: age
 
-    Y_c,t,a		~ observed deaths due to a cause in a country/year/age/sex
-    
+    Y_c,t,a     ~ observed deaths due to a cause in a country/year/age/sex
+
     mu_c,t,a    ~ exp(beta*X_c,t,a + ln(E) + pi_s + pi_r + pi_c + e_c,t,a)
-            
+
         beta    ~ fixed effects (coefficients on covariates)
                   Laplace with Mean = 0
         X_c,t,a ~ covariates (by country/year/age)
-        
+
         E       ~ exposure (total number of all-cause deaths observed)
-        
+
         pi_s    ~ 'random effect' by super-region
                   year*age grid of offsets
                   sampled from MVN with matern covariance then interpolated via cubic spline
@@ -28,5 +28,5 @@ Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
                   sampled from MVN with matern covariance then interpolated via cubic spline
 
         e_c,t,a ~ error
-                        
+
     alpha       ~ overdispersion parameter

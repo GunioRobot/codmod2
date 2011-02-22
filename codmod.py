@@ -162,7 +162,7 @@ class codmod:
         covs = covs[0:-2]
 
         # load observed deaths plus covariates
-        obs_sql = 'SELECT iso3 as country, a.region, a.super_region, age, year, sex, cf, sample_size, envelope, pop, ' + covs + ' FROM full_cod_database AS a LEFT JOIN all_covariates USING (iso3,year,sex,age) WHERE a.cod_id="' + self.cause + '";'
+        obs_sql = 'SELECT iso3 as country, a.region, a.super_region, age, year, sex, cf, sample_size, a.envelope, a.pop, ' + covs + ' FROM full_cod_database AS a LEFT JOIN all_covariates USING (iso3,year,sex,age) WHERE a.cod_id="' + self.cause + '";'
         obs = mysql_to_recarray(self.cursor, obs_sql)
         obs = obs[np.where((obs.year >= self.year_range[0]) & (obs.year <= self.year_range[1]) & (obs.age >= self.age_range[0]) & (obs.age <= self.age_range[1]) & (obs.sex == self.sex_num))[0]]
 
@@ -201,7 +201,7 @@ class codmod:
             year_window_lookups[y] = np.where((obs.year >= y-2.) & (obs.year <= y+2.))[0]
         smooth_me = np.where((obs.cf==0.) | (obs.cf==1.) | (obs.sample_size<100.))[0]
         for i in smooth_me:
-            obs.cf[i] = obs.cf[np.intersect1d(country_age_lookups[obs.country[i]+'_'+str(obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
+            obs.cf[i] = obs.cf[np.intersect1d(country_age_lookups[obs.country[i]+'_'+str(obs.age[i])],year_window_lookups[obs.year[i]])].mean()
 
         # for cases in which the CF is still 0 or 1 after the moving average, use the smallest/largest non-0/1 CF observed in that region-age
         region_age_lookups = {}

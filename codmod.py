@@ -463,17 +463,17 @@ class codmod:
 
         # observe the data
         @mc.observed
-        def data_likelihood(value=self.training_data.y, mu=param_pred, alpha=alpha):
+        def data_likelihood(value=self.training_data.cf*self.training_data.sample_size, mu=param_pred, alpha=alpha):
             return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
-        import time as tm
-        dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
-        db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+        #import time as tm
+        #dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
+        #db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
 
         # MCMC step methods
-        self.mod_mc = mc.MCMC(vars(), db=db)
-        #self.mod_mc = mc.MCMC(vars(), db='ram')
+        #self.mod_mc = mc.MCMC(vars(), db=db)
+        self.mod_mc = mc.MCMC(vars(), db='ram')
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.beta)
         
         # use covariance matrix to seed adaptive metropolis steps

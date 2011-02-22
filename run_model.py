@@ -12,6 +12,6 @@ m.load()
 
 m.initialize_model()
 
-
+m.sample()
 
 

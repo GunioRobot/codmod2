@@ -280,27 +280,35 @@ class codmod:
         # prep all the in-sample data
         self.data_rows = self.observation_matrix.shape[0]
         print 'Data Rows:', self.data_rows
+        self.training_split()
 
 
-    def training_split(self, holdout_unit='datapoint', holdout_prop=.2):
+    def training_split(self, holdout_unit='none', holdout_prop=.2):
         ''' Splits the data up into test and train subsets '''
         if holdout_prop > .99 or holdout_prop < .01:
             raise ValueError('The holdout proportion must be between .1 and .99.')
-        if holdout_unit == 'datapoint':
-            data_flagged = recfunctions.append_fields(self.in_sample_data, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
+        if holdout_unit == 'none':
+            self.training_data = self.observation_matrix
+            self.test_data = self.observation_matrix
+        elif holdout_unit == 'datapoint':
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
+            self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
+            self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+        elif holdout_unit == 'country-year':
+            country_years = [self.observation_matrix.country[i] + '_' + str(self.observation_matrix.year[i]) for i in self.data_rows]
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
+            for i in np.unique(country_years):
+                data_flagged[np.where(country_years==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
         elif holdout_unit == 'country':
-            countries = np.unique(self.in_sample_data.country)
-            self.countries = countries
-            holdouts = np.core.records.fromarrays([countries, np.random.binomial(1, holdout_prop, len(countries))], names=['country','holdout'])
-            self.holdouts = holdouts
-            data_flagged = recfunctions.join_by(['country'], self.in_sample_data, holdouts, 'leftouter')
-            self.data_flagged = data_flagged
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
+            for i in self.country_list:
+                data_flagged.holdout[np.where(country==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
         else:
-            raise ValueError("The holdout unit must be either 'datapoint' or 'country'.")
+            raise ValueError("The holdout unit must be either 'datapoint', 'country-year', or 'country'.")
         
 
 

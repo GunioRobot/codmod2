@@ -1,6 +1,6 @@
 '''
 Author:	    Kyle Foreman
-Date:	    16 February 2011
+Date:	    22 February 2011
 Purpose:    Fit cause of death models over space, time, and age
 '''
 
@@ -320,21 +320,21 @@ class codmod:
     def initialize_model(self, find_start_vals=True):
         '''
         Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
-        
+
             where	s: super-region
                     r: region
                     c: country
                     t: year
                     a: age
 
-            Y_c,t,a		~ observed deaths due to a cause in a country/year/age/sex
-            
+            Y_c,t,a	    ~ observed deaths due to a cause in a country/year/age/sex
+
             mu_c,t,a    ~ exp(beta*X_c,t,a + ln(E) + pi_s + pi_r + pi_c + e_c,t,a)
-            
+
                         beta    ~ fixed effects (coefficients on covariates)
                                   Laplace with Mean = 0
                         X_c,t,a ~ covariates (by country/year/age)
-                        
+
                         E       ~ exposure (total number of all-cause deaths observed)
                         
                         pi_s    ~ 'random effect' by super-region
@@ -348,7 +348,7 @@ class codmod:
                                   sampled from MVN with matern covariance then interpolated via cubic spline
 
                         e_c,t,a ~ error
-                        
+
             alpha       ~ overdispersion parameter
         '''
         # make a matrix of covariates
@@ -369,23 +369,18 @@ class codmod:
         tau_c = mc.Truncnorm('tau_c', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
 
         # find indices for each subset
-        super_regions = np.unique(self.training_data.super_region)
+        super_regions = self.super_region_list
         s_index = [np.where(self.training_data.super_region==s) for s in super_regions]
         s_list = range(len(super_regions))
-        regions = np.unique(self.training_data.region)
+        regions = self.region_list
         r_index = [np.where(self.training_data.region==r) for r in regions]
         r_list = range(len(regions))
-        countries = np.unique(self.training_data.country)
+        countries = self.country_list
         c_index = [np.where(self.training_data.country==c) for c in countries]
         c_list = range(len(countries))
-        years = range(self.year_range[0],self.year_range[1]+1)
+        years = self.year_list
         t_index = dict([(t, i) for i, t in enumerate(years)])
-        ages = range(self.age_range[0],self.age_range[1]+1,5)
-        if self.age_range[0] == 0:
-            ages.insert(1,1)
-        elif self.age_range[0] == 1:
-            ages = range(5,self.age_range[1]+1,5)
-            ages.insert(0,1)
+        ages = self.age_list
         a_index = dict([(a, i) for i, a in enumerate(ages)])
         t_by_s = [[t_index[self.training_data.year[j]] for j in s_index[s][0]] for s in s_list]
         a_by_s = [[a_index[self.training_data.age[j]] for j in s_index[s][0]] for s in s_list]

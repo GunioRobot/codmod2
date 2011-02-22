@@ -1,0 +1,8 @@
+# TODO
+How to include coverage in uncertainty?
+	Currently, only sample size is taken into consideration - so a small study in a big country can have as much sway as a comprehensive study in a small country
+Predict test data
+Predict all country years
+Plot input data
+Plot outputs
+Compute metrics of fit

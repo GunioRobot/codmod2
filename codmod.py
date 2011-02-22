@@ -290,10 +290,12 @@ class codmod:
         if holdout_unit == 'none':
             self.training_data = self.observation_matrix
             self.test_data = self.observation_matrix
+            print 'Fitting model to all data'
         elif holdout_unit == 'datapoint':
             data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of datapoints'
         elif holdout_unit == 'country-year':
             country_years = [self.observation_matrix.country[i] + '_' + str(self.observation_matrix.year[i]) for i in self.data_rows]
             data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
@@ -301,12 +303,14 @@ class codmod:
                 data_flagged[np.where(country_years==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of country-years'
         elif holdout_unit == 'country':
             data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
             for i in self.country_list:
                 data_flagged.holdout[np.where(country==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of countries'
         else:
             raise ValueError("The holdout unit must be either 'datapoint', 'country-year', or 'country'.")
         
@@ -327,7 +331,7 @@ class codmod:
                     t: year
                     a: age
 
-            Y_c,t,a	    ~ observed deaths due to a cause in a country/year/age/sex
+            Y_c,t,a     ~ observed deaths due to a cause in a country/year/age/sex
 
             mu_c,t,a    ~ exp(beta*X_c,t,a + ln(E) + pi_s + pi_r + pi_c + e_c,t,a)
 

@@ -216,13 +216,13 @@ class codmod:
             if candidates.shape[0] == 0:
                 obs.cf[i] = 0.
             else:
-                obs.cf[i] = self.death_obs.cf[candidates].min()
-        for i in np.where(self.death_obs.cf==1.)[0]:
+                obs.cf[i] = obs.cf[candidates].min()
+        for i in np.where(obs.cf==1.)[0]:
             candidates = np.intersect1d(region_age_lookups[str(obs.region[i])+'_'+str(obs.age[i])], validcfs)
             if candidates.shape[0] == 0:
                 obs.cf[i] = 1.
             else:
-                obs.cf[i] = self.death_obs.cf[candidates].max()
+                obs.cf[i] = obs.cf[candidates].max()
 
         # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
         obs = np.delete(obs, np.where((obs.cf == 0.) | (obs.cf == 1.))[0], axis=0)

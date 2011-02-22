@@ -261,15 +261,15 @@ class codmod:
                 if j == self.age_ref:
                     pre_ref = 0
                 elif pre_ref == 1:
-                    all_vectors.append(np.array(all_vectors.age==j).astype(np.float))
+                    all_vectors.append(np.array(all.age==j).astype(np.float))
                     all_names.append('x' + str(len(self.covariate_list)+i+1))
-                    obs_vectors.append(np.array(obs_vectors.age==j).astype(np.float))
+                    obs_vectors.append(np.array(obs.age==j).astype(np.float))
                     obs_names.append('x' + str(len(self.covariate_list)+i+1))
                     self.covariate_dict['x' + str(len(self.covariate_list)+i+1)] = 'Age ' + str(j)
                 else:
-                    all_vectors.append(np.array(all_vectors.age==j).astype(np.float))
+                    all_vectors.append(np.array(all.age==j).astype(np.float))
                     all_names.append('x' + str(len(self.covariate_list)+i))
-                    obs_vectors.append(np.array(obs_vectors.age==j).astype(np.float))
+                    obs_vectors.append(np.array(obs.age==j).astype(np.float))
                     obs_names.append('x' + str(len(self.covariate_list)+i))
                     self.covariate_dict['x' + str(len(self.covariate_list)+i)] = 'Age ' + str(j)
         
@@ -360,9 +360,9 @@ class codmod:
         X = np.array([self.training_data['x%d'%i] for i in range(k)])
 
         # prior on beta (covariate coefficients)
-        beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.zeros(k))
+        beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.linalg.lstsq(X.T, np.log(self.training_data.cf))[0])
         # prior on alpha (overdispersion parameter)
-        alpha = mc.Exponential('alpha', beta=2.0, value=2.0)
+        alpha = mc.Exponential('alpha', beta=3.0, value=3.0)
         # priors on matern amplitudes
         sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
         sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)
@@ -396,7 +396,7 @@ class codmod:
         # fixed-effect predictions
         @mc.deterministic
         def fixed_effect(X=X, beta=beta):
-            '''fixed_effect_c,t,a = beta * X_c,t,a'''
+            ''' fixed_effect_c,t,a = beta * X_c,t,a '''
             return np.dot(beta, X)
 
         # find all the points on which to evaluate the random effects grid
@@ -462,8 +462,9 @@ class codmod:
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
+        y = self.training_data.cf * self.training_data.sample_size
         @mc.observed
-        def data_likelihood(value=self.training_data.cf*self.training_data.sample_size, mu=param_pred, alpha=alpha):
+        def data_likelihood(value=y, mu=param_pred, alpha=alpha):
             return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
@@ -483,9 +484,11 @@ class codmod:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_r_samples[r], cov=np.array(C_r.value*.01))
         for c in c_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
+
+        
         
         # find good initial conditions with MAP approximation
-        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.alpha]] + \
+        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc. self.mod_mc.alpha]] + \
             [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
             [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
             [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \

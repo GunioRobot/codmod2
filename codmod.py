@@ -154,113 +154,132 @@ class codmod:
         Loads codmod data from the MySQL server.
         The resulting query will get all the data for a specified cause and sex, plus any covariates specified
         '''
-        # load in selected covariates
+        # make the sql covariate query
         covs = ''
         for i in list(set(self.covariates_untransformed)):
             if i != 'year':
-                covs = covs + i + ','
-        cov_sql = 'SELECT iso3 AS country,region,super_region,age,year,sex,' + covs[0:-1] + ' FROM all_covariates WHERE sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
-        print 'Loading covariates...'
-        covariate_data = mysql_to_recarray(self.cursor, cov_sql)
+                covs = covs + i + ', '
+        covs = covs[0:-2]
 
+        # load observed deaths plus covariates
+        obs_sql = 'SELECT iso3 as country, a.region, a.super_region, age, year, sex, cf, sample_size, envelope, pop, ' + covs + ' FROM full_cod_database AS a LEFT JOIN all_covariates USING (iso3,year,sex,age) WHERE a.cod_id="' + self.cause + '";'
+        obs = mysql_to_recarray(self.cursor, obs_sql)
+        obs = obs[np.where((obs.year >= self.year_range[0]) & (obs.year <= self.year_range[1]) & (obs.age >= self.age_range[0]) & (obs.age <= self.age_range[1]) & (obs.sex == self.sex_num))[0]]
+
+        # load in just covariates (for making predictions)
+        all_sql = 'SELECT iso3 as country, region, super_region, age, year, sex, envelope, pop, ' + covs + ' FROM all_covariates;'
+        all = mysql_to_recarray(self.cursor, all_sql)
+        all = all[np.where((all.year >= self.year_range[0]) & (all.year <= self.year_range[1]) & (all.age >= self.age_range[0]) & (all.age <= self.age_range[1]) & (all.sex == self.sex_num))[0]]
+        
         # get rid of rows for which covariates are unavailable
-        for i in range(len(self.covariate_list)):
-            j = covariate_data[self.covariates_untransformed[i]]
-            covariate_data = np.delete(covariate_data, np.where(np.isnan(j))[0], axis=0)
+        for i in list(set(self.covariates_untransformed)):
+            all = np.delete(all, np.where(np.isnan(all[i]))[0], axis=0)
+            obs = np.delete(obs, np.where(np.isnan(obs[i]))[0], axis=0)
 
-        # make covariate matrix (including transformations and normalization)
-        covariate_vectors = [covariate_data.country, covariate_data.region, covariate_data.super_region, covariate_data.year, covariate_data.age, covariate_data.sex, np.ones(covariate_data.shape[0])]
-        covariate_names = ['country', 'region', 'super_region', 'year', 'age', 'sex', 'x0']
+        # remove observations in which the CF is missing or outside of (0,1), or where sample size is missing
+        obs = np.delete(obs, np.where((np.isnan(obs.cf)) | (obs.cf > 1) | (obs.cf < 0) | (np.isnan(obs.sample_size)))[0], axis=0)
+
+        # make lists of all the countries/regions/ages/years to predict for
+        self.country_list = np.unique(all.country)
+        self.region_list = np.unique(all.region)
+        self.super_region_list = np.unique(all.super_region)
+        self.age_list = np.unique(all.age)
+        self.year_list = np.unique(all.year)
+
+        # apply a moving average (5 year window) on cause fractions of 0 or 1, or where sample size is less than 100
+        age_lookups = {}
+        for a in self.age_list:
+            age_lookups[a] = np.where(obs.age == a)[0]
+        country_lookups = {}
+        country_age_lookups = {}
+        for c in self.country_list:
+            country_lookups[c] = np.where(obs.country == c)[0]
+            for a in self.age_list:
+                country_age_lookups[c+'_'+str(a)] = np.intersect1d(country_lookups[c], age_lookups[a])
+        year_window_lookups = {}
+        for y in range(self.year_range[0],self.year_range[1]+1):
+            year_window_lookups[y] = np.where((obs.year >= y-2.) & (obs.year <= y+2.))[0]
+        smooth_me = np.where((obs.cf==0.) | (obs.cf==1.) | (obs.sample_size<100.))[0]
+        for i in smooth_me:
+            obs.cf[i] = obs.cf[np.intersect1d(country_age_lookups[obs.country[i]+'_'+str(obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
+
+        # for cases in which the CF is still 0 or 1 after the moving average, use the smallest/largest non-0/1 CF observed in that region-age
+        region_age_lookups = {}
+        region_lookups = {}
+        for r in self.region_list:
+            region_lookups[r] = np.where(obs.region == r)[0]
+            for a in self.age_list:
+                region_age_lookups[str(r)+'_'+str(a)] = np.intersect1d(region_lookups[r], age_lookups[a])
+        validcfs = np.where((obs.cf>0.) & (obs.cf<1.))[0]
+        for i in np.where(obs.cf==0.)[0]:
+            candidates = np.intersect1d(region_age_lookups[str(obs.region[i])+'_'+str(obs.age[i])], validcfs)
+            if candidates.shape[0] == 0:
+                obs.cf[i] = 0.
+            else:
+                obs.cf[i] = self.death_obs.cf[candidates].min()
+        for i in np.where(self.death_obs.cf==1.)[0]:
+            candidates = np.intersect1d(region_age_lookups[str(obs.region[i])+'_'+str(obs.age[i])], validcfs)
+            if candidates.shape[0] == 0:
+                obs.cf[i] = 1.
+            else:
+                obs.cf[i] = self.death_obs.cf[candidates].max()
+
+        # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
+        obs = np.delete(obs, np.where((obs.cf == 0.) | (obs.cf == 1.))[0], axis=0)
+        
+        # make covariate matrices (including transformations and normalization)
+        obs_vectors = [obs.country, obs.region, obs.super_region, obs.year, obs.age, obs.cf, obs.sample_size, obs.envelope, obs.pop, np.ones(obs.shape[0])]
+        obs_names = ['country', 'region', 'super_region', 'year', 'age', 'cf', 'sample_size', 'envelope', 'pop', 'x0']
+        all_vectors = [all.country, all.region, all.super_region, all.year, all.age, all.envelope, all.pop, np.ones(all.shape[0])]
+        all_names = ['country', 'region', 'super_region', 'year', 'age', 'envelope', 'pop', 'x0']
         self.covariate_dict = {'x0': 'constant'}
         for i in range(len(self.covariate_list)):
-            j = covariate_data[self.covariates_untransformed[i]]
+            a = all[self.covariates_untransformed[i]]
+            o = obs[self.covariates_untransformed[i]]
             if self.covariate_transformations[i] == 'ln':
-                j = np.log(j)
+                a = np.log(a)
+                o = np.log(o)
             elif self.covariate_transformations[i] == 'ln+sq':
-                j = (np.log(j))**2
+                a = (np.log(a))**2
+                o = (np.log(o))**2
             elif self.covariate_transformations[i] == 'sq':
-                j = j**2
+                a = a**2
+                o = o**2
             if self.normalize == True:
-                j = ((j-np.mean(j))/np.std(j))
-            covariate_vectors.append(j)
-            covariate_names.append('x' + str(i+1))
+                a = ((a-np.mean(a))/np.std(a))
+                o = ((o-np.mean(o))/np.std(o))
+            all_vectors.append(a)
+            all_names.append('x' + str(i+1))
+            obs_vectors.append(o)
+            obs_names.append('x' + str(i+1))
             self.covariate_dict['x' + str(i+1)] = self.covariate_list[i]
 
         # create age dummies if specified
         if self.age_dummies == True:
             pre_ref = 1
-            for i,a in enumerate(np.unique(covariate_data.age)):
-                if a == self.age_ref:
+            for i,j in enumerate(self.age_list):
+                if j == self.age_ref:
                     pre_ref = 0
                 elif pre_ref == 1:
-                    covariate_vectors.append(np.array(covariate_data.age==a).astype(np.float))
-                    covariate_names.append('x' + str(len(self.covariate_list)+i+1))
-                    self.covariate_dict['x' + str(len(self.covariate_list)+i+1)] = 'Age ' + str(a)
+                    all_vectors.append(np.array(all_vectors.age==j).astype(np.float))
+                    all_names.append('x' + str(len(self.covariate_list)+i+1))
+                    obs_vectors.append(np.array(obs_vectors.age==j).astype(np.float))
+                    obs_names.append('x' + str(len(self.covariate_list)+i+1))
+                    self.covariate_dict['x' + str(len(self.covariate_list)+i+1)] = 'Age ' + str(j)
                 else:
-                    covariate_vectors.append(np.array(covariate_data.age==a).astype(np.float))
-                    covariate_names.append('x' + str(len(self.covariate_list)+i))
-                    self.covariate_dict['x' + str(len(self.covariate_list)+i)] = 'Age ' + str(a)
-        covariate_matrix = np.core.records.fromarrays(covariate_vectors, names=covariate_names)
-
-        # load in death observations
-        deaths_sql = 'SELECT cf,iso3 AS country,year,sex,age,sample_size,region,envelope,pop FROM full_cod_database WHERE cod_id="' + self.cause + '" AND sex=' + str(self.sex_num) + ' AND age BETWEEN ' + str(self.age_range[0]) + ' AND ' + str(self.age_range[1]) + ' AND year BETWEEN ' + str(self.year_range[0]) + ' AND ' + str(self.year_range[1])
-        print 'Loading death data...'
-        self.death_obs = mysql_to_recarray(self.cursor, deaths_sql)
-
-        # remove observations in which the CF is missing or not within (0,1)
-        self.death_obs = np.delete(self.death_obs, np.where((np.isnan(self.death_obs.cf)) | (self.death_obs.cf > 1) | (self.death_obs.cf < 0))[0], axis=0)
-
-        # set sample size to 10 when sample size is missing
-        self.death_obs.sample_size[np.where((np.isnan(self.death_obs.sample_size)) | (self.death_obs.sample_size < 10.))] = 10.
-
-        # apply a moving average (5 year window) on cause fractions of 0 or 1, or where sample size is less than 100
-        country_age_lookups = {}
-        for c in np.unique(self.death_obs.country):
-            for a in np.unique(self.death_obs.age):
-                country_age_lookups[c+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.country == c))[0]
-        year_window_lookups = {}
-        for y in range(self.year_range[0],self.year_range[1]+1):
-            year_window_lookups[y] = np.where((self.death_obs.year >= y-2.) & (self.death_obs.year <= y+2.))[0]
-        smooth_me = np.where((self.death_obs.cf==0.) | (self.death_obs.cf==1.) | (self.death_obs.sample_size<100.))[0]
-        for i in smooth_me:
-            self.death_obs.cf[i] = self.death_obs.cf[np.intersect1d(country_age_lookups[self.death_obs.country[i]+str(self.death_obs.age[i])],year_window_lookups[self.death_obs.year[i]])].mean()
-
-        # for cases in which the CF is still 0 or 1 after the moving average, use the smallest/largest non-0/1 CF observed in that region-age
-        region_age_lookups = {}
-        for r in np.unique(self.death_obs.region):
-            for a in np.unique(self.death_obs.age):
-                region_age_lookups[str(r)+'_'+str(a)] = np.where((self.death_obs.age == a) & (self.death_obs.region == r))[0]
-        nonzeros = np.where(self.death_obs.cf>0)[0]
-        nonones = np.where(self.death_obs.cf<1)[0]
-        for i in np.where(self.death_obs.cf==0.)[0]:
-            candidates = np.intersect1d(region_age_lookups[str(self.death_obs.region[i])+'_'+str(self.death_obs.age[i])], nonzeros)
-            if candidates.shape[0] == 0:
-                self.death_obs.cf[i] = 0.
-            else:
-                self.death_obs.cf[i] = self.death_obs.cf[candidates].min()
-        for i in np.where(self.death_obs.cf==1.)[0]:
-            candidates = np.intersect1d(region_age_lookups[str(self.death_obs.region[i])+'_'+str(self.death_obs.age[i])], nonones)
-            if candidates.shape[0] == 0:
-                self.death_obs.cf[i] = 1.
-            else:
-                self.death_obs.cf[i] = self.death_obs.cf[candidates].max()
-
-        # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
-        self.death_obs = np.delete(self.death_obs, np.where((self.death_obs.cf == 0.) | (self.death_obs.cf == 1.))[0], axis=0)
-
-        # y is the observed number of deaths
-        y = self.death_obs.cf * self.death_obs.sample_size
-        obs = np.core.records.fromarrays([self.death_obs.country, self.death_obs.year, self.death_obs.age, self.death_obs.sex, y, self.death_obs.envelope, self.death_obs.pop, self.death_obs.sample_size], names=['country','year','age','sex','y','envelope','pop','sample_size'])
-
+                    all_vectors.append(np.array(all_vectors.age==j).astype(np.float))
+                    all_names.append('x' + str(len(self.covariate_list)+i))
+                    obs_vectors.append(np.array(obs_vectors.age==j).astype(np.float))
+                    obs_names.append('x' + str(len(self.covariate_list)+i))
+                    self.covariate_dict['x' + str(len(self.covariate_list)+i)] = 'Age ' + str(j)
+        
+        # return the prediction and observation matrices
+        self.prediction_matrix = np.core.records.fromarrays(all_vectors, names=all_names)
+        self.observation_matrix = np.core.records.fromarrays(obs_vectors, names=obs_names)
+            
         # prep all the in-sample data
-        print obs.shape
-        self.in_sample_data = recfunctions.join_by(['country','year','age','sex'], obs, covariate_matrix, jointype='inner') 
-        self.training_data = self.in_sample_data
-        self.data_rows = self.in_sample_data.shape[0]
+        self.data_rows = self.observation_matrix.shape[0]
         print 'Data Rows:', self.data_rows
-
-        # prep the complete data series (all covariate observations, plus death observations where available)
-        self.all_data = recfunctions.join_by(['country','year','age','sex'], covariate_matrix, obs, jointype='leftouter')
 
 
     def training_split(self, holdout_unit='datapoint', holdout_prop=.2):

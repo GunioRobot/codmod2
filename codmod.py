@@ -362,7 +362,7 @@ class codmod:
         # prior on beta (covariate coefficients)
         beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.linalg.lstsq(X.T, np.log(self.training_data.cf))[0])
         # prior on alpha (overdispersion parameter)
-        alpha = mc.Exponential('alpha', beta=3.0, value=3.0)
+        #alpha = mc.Exponential('alpha', beta=3.0, value=0.)
         # priors on matern amplitudes
         sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
         sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)
@@ -423,10 +423,18 @@ class codmod:
         def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
             return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
+        # find starting values for each random effect just using the data means for each 
+        pi_c_startval = {}
+        for c in c_list:
+            pi_c_startval[c] = (np.log(self.training_data.cf) - fixed_effect.value)[c_index[c]].mean()
+            if np.isnan(pi_c_startval[c]):
+                pi_c_startval[c] = 0.
+        self.c = pi_c_startval
+
         # draw samples for each random effect matrix
-        pi_s_samples = [mc.MvNormalCov('pi_s_%s'%s, np.zeros(sample_points.shape[0]), C_s, value=np.zeros(sample_points.shape[0])) for s in super_regions]
-        pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in regions]
-        pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in countries]
+        pi_s_samples = [mc.MvNormalCov('pi_s_%s'%s, np.zeros(sample_points.shape[0]), C_s, value=np.zeros(sample_points.shape[0])) for s in s_list]
+        pi_r_samples = [mc.MvNormalCov('pi_r_%s'%r, np.zeros(sample_points.shape[0]), C_r, value=np.zeros(sample_points.shape[0])) for r in r_list]
+        pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.ones(sample_points.shape[0])*pi_c_startval[c]) for c in c_list]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
         @mc.deterministic
@@ -464,8 +472,10 @@ class codmod:
         # observe the data
         y = self.training_data.cf * self.training_data.sample_size
         @mc.observed
-        def data_likelihood(value=y, mu=param_pred, alpha=alpha):
-            return mc.negative_binomial_like(value, mu, alpha)
+        #def data_likelihood(value=y, mu=param_pred, alpha=alpha):
+        #   return mc.negative_binomial_like(value, mu, alpha)
+        def data_likelihood(value=y, mu=param_pred):
+            return mc.poisson_like(value, mu)
 
         # create a pickle backend to store the model
         #import time as tm
@@ -485,14 +495,14 @@ class codmod:
         for c in c_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
 
-        
-        
         # find good initial conditions with MAP approximation
-        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc. self.mod_mc.alpha]] + \
+        #for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.alpha]] + \
+        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta]] + \
             [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
             [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
             [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
-            [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.alpha]]:
+            [[self.mod_mc.data_likelihood, self.mod_mc.beta]]:
+            #[[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.alpha]]:
             print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
             mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
             print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])

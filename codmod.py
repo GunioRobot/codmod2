@@ -11,6 +11,7 @@ from scipy import interpolate
 from pymc.Matplot import plot as mcplot
 import matplotlib as plot
 import numpy.lib.recfunctions as recfunctions
+import gradient_samplers as gs
 
 class codmod:
     '''
@@ -362,7 +363,7 @@ class codmod:
         # prior on beta (covariate coefficients)
         beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.linalg.lstsq(X.T, np.log(self.training_data.cf))[0])
         # prior on alpha (overdispersion parameter)
-        #alpha = mc.Exponential('alpha', beta=3.0, value=0.)
+        alpha = mc.Uniform('alpha', lower=1., upper=10.**11., value=10.**10.)
         # priors on matern amplitudes
         sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
         sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)
@@ -376,12 +377,21 @@ class codmod:
         super_regions = self.super_region_list
         s_index = [np.where(self.training_data.super_region==s) for s in super_regions]
         s_list = range(len(super_regions))
+        self.super_region_lookup = {}
+        for s in s_list:
+            self.super_region_lookup[super_regions[s]] = s
         regions = self.region_list
         r_index = [np.where(self.training_data.region==r) for r in regions]
         r_list = range(len(regions))
+        self.region_lookup = {}
+        for r in r_list:
+            self.region_lookup[regions[r]] = r
         countries = self.country_list
         c_index = [np.where(self.training_data.country==c) for c in countries]
         c_list = range(len(countries))
+        self.country_lookup = {}
+        for c in c_list:
+            self.country_lookup[countries[c]] = c
         years = self.year_list
         t_index = dict([(t, i) for i, t in enumerate(years)])
         ages = self.age_list
@@ -423,7 +433,7 @@ class codmod:
         def C_c(s=sample_points, sigma=sigma_c, tau=tau_c):
             return mc.gp.cov_funs.matern.euclidean(s, s, amp=sigma, scale=tau, diff_degree=2., symm=True)
 
-        # find starting values for each random effect just using the data means for each 
+        # find starting values for each country random effect just using the data means
         pi_c_startval = {}
         for c in c_list:
             pi_c_startval[c] = (np.log(self.training_data.cf) - fixed_effect.value)[c_index[c]].mean()
@@ -470,12 +480,16 @@ class codmod:
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
-        y = self.training_data.cf * self.training_data.sample_size
         @mc.observed
-        #def data_likelihood(value=y, mu=param_pred, alpha=alpha):
-        #   return mc.negative_binomial_like(value, mu, alpha)
-        def data_likelihood(value=y, mu=param_pred):
-            return mc.poisson_like(value, mu)
+        def data_likelihood(value=self.training_data.cf * self.training_data.sample_size, mu=param_pred, alpha=alpha):
+            if mu.min() <= 0.:
+                tmp = mu.copy()
+                tmp[np.where(tmp <= 0.)] = tmp[np.where(tmp > 0.)].min()
+                mu = tmp
+            if alpha >= 10**10:
+                return mc.poisson_like(value, mu)
+            else:
+                return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
         #import time as tm
@@ -485,7 +499,17 @@ class codmod:
         # MCMC step methods
         #self.mod_mc = mc.MCMC(vars(), db=db)
         self.mod_mc = mc.MCMC(vars(), db='ram')
-        self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.beta)
+        '''
+        stochastics = [beta, sigma_s, sigma_r, sigma_c, tau_s, tau_r, tau_c]
+        for s in self.mod_mc.pi_s_samples:
+            stochastics.append(s)
+        for r in self.mod_mc.pi_r_samples:
+            stochastics.append(r)
+        for c in self.mod_mc.pi_c_samples:
+            stochastics.append(c)
+        #self.mod_mc.use_step_method(gs.HMCStep, stochastics)
+        '''
+        self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])
         
         # use covariance matrix to seed adaptive metropolis steps
         for s in s_list:

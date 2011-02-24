@@ -364,15 +364,15 @@ class codmod:
         beta = mc.Laplace('beta', mu=0.0, tau=1.0, value=np.linalg.lstsq(X.T, np.log(self.training_data.cf))[0])
         # prior on alpha (overdispersion parameter)
         # implemented as alpha = 10^rho; alpha=1 high overdispersion, alpha>10^10=poisson
-        rho = mc.Truncnorm('rho', mu=8., tau=.1, a=0., b=11., value=8.)
+        rho = mc.Normal('rho', mu=8.0, tau=.1, value=8.0)
         # priors on matern amplitudes
         sigma_s = mc.Exponential('sigma_s', beta=2.0, value=2.0)
         sigma_r = mc.Exponential('sigma_r', beta=1.5, value=1.5)
         sigma_c = mc.Exponential('sigma_c', beta=1.0, value=1.0)
         # priors on matern scales
-        tau_s = mc.Truncnorm('tau_s', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
-        tau_r = mc.Truncnorm('tau_r', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
-        tau_c = mc.Truncnorm('tau_c', mu=15.0, tau=5.0**-2.0, a=5.0, b=np.Inf, value=15.0)
+        tau_s = mc.Uniform('tau_s', lower=5.0, upper=50.0, value=15.0)
+        tau_r = mc.Uniform('tau_r', lower=5.0, upper=50.0, value=15.0)
+        tau_c = mc.Uniform('tau_c', lower=5.0, upper=50.0, value=15.0)
 
         # find indices for each subset
         super_regions = self.super_region_list
@@ -478,13 +478,11 @@ class codmod:
             return 10.**rho
         @mc.observed
         def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=alpha):
-            if mu.min() <= 0.:
-                tmp = mu.copy()
-                tmp[np.where(tmp <= 0.)] = tmp[np.where(tmp > 0.)].min()
-                mu = tmp
             if alpha >= 10**10:
                 return mc.poisson_like(value, mu)
             else:
+                if mu.min() <= 0.:
+                    mu = mu + 10**-10
                 return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model

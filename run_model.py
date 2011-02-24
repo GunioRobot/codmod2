@@ -8,10 +8,13 @@ m.set_covariates(covariate_list=['year','education_yrs_pc','ln(TFR)','neonatal_d
 m.set_window(age_range=[15,45], year_range=[1980,2010])
 m.set_pi_samples(age_samples=[15,25,35,45], year_samples=[1980,1990,2000,2010])
 
+# load in the data
 m.load()
 
+# build the model and use MAP to find starting values
 m.initialize_model()
 
+# use MCMC to find posterior
 m.sample()
 
 

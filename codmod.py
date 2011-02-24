@@ -477,7 +477,7 @@ class codmod:
         def alpha(rho=rho):
             return 10.**rho
         @mc.observed
-        def data_likelihood(value=self.training_data.cf * self.training_data.sample_size, mu=param_pred, alpha=alpha):
+        def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=alpha):
             if mu.min() <= 0.:
                 tmp = mu.copy()
                 tmp[np.where(tmp <= 0.)] = tmp[np.where(tmp > 0.)].min()
@@ -488,23 +488,13 @@ class codmod:
                 return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
-        #import time as tm
-        #dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
-        #db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+        import time as tm
+        dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
+        db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
 
         # MCMC step methods
-        #self.mod_mc = mc.MCMC(vars(), db=db)
-        self.mod_mc = mc.MCMC(vars(), db='ram')
-        '''
-        stochastics = [beta, sigma_s, sigma_r, sigma_c, tau_s, tau_r, tau_c]
-        for s in self.mod_mc.pi_s_samples:
-            stochastics.append(s)
-        for r in self.mod_mc.pi_r_samples:
-            stochastics.append(r)
-        for c in self.mod_mc.pi_c_samples:
-            stochastics.append(c)
-        #self.mod_mc.use_step_method(gs.HMCStep, stochastics)
-        '''
+        self.mod_mc = mc.MCMC(vars(), db=db)
+        #self.mod_mc = mc.MCMC(vars(), db='ram')
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.rho, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])
         
         # use covariance matrix to seed adaptive metropolis steps
@@ -516,19 +506,28 @@ class codmod:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01))
 
         # find good initial conditions with MAP approximation
-        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]] + \
-            [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
-            [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
-            [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
-            [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]]:
-            print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-            mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-            print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
+        if find_start_vals==True:
+            for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]] + \
+                [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
+                [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
+                [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
+                [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]]:
+                print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+                mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
+                print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
 
 
     def sample(self, iter=5000, burn=1000, thin=5, verbose=1, chains=1):
         ''' Use MCMC to sample from the posterior '''
-        self.mod_mc.sample(iter=iter, burn=burn, thin=thin, verbose=verbose)
+        if chains==1:
+            self.mod_mc.sample(iter=iter, burn=burn, thin=thin, verbose=verbose)
+        else:
+            raise ValueError('Only 1 chain implemented at this time.')
+
+
+    def mcmc_diagnostics(self):
+        ''' Make diagnostic plots of the MCMC chains '''
+        mcplot(self.mod_mc)
 
 
 def mysql_to_recarray(cursor, query):

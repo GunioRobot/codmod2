@@ -11,7 +11,7 @@ from scipy import interpolate
 from pymc.Matplot import plot as mcplot
 import matplotlib as plot
 import numpy.lib.recfunctions as recfunctions
-import gradient_samplers as gs
+#import gradient_samplers as gs
 
 class codmod:
     '''
@@ -490,14 +490,10 @@ class codmod:
         # create a pickle backend to store the model
         import time as tm
         dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
-        db = mc.database.pickle.Database(dbname=dbname, dbmode='w')
+        self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
 
         # MCMC step methods
-        self.mod_mc = mc.MCMC(vars(), db=db)
-        #self.mod_mc = mc.MCMC(vars(), db='ram')
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.rho, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])
-        
-        # use covariance matrix to seed adaptive metropolis steps
         for s in s_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_s_samples[s], cov=np.array(C_s.value*.01))
         for r in r_list:

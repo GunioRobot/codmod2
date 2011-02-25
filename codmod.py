@@ -179,8 +179,8 @@ class codmod:
             all = np.delete(all, np.where(np.isnan(all[i]))[0], axis=0)
             obs = np.delete(obs, np.where(np.isnan(obs[i]))[0], axis=0)
 
-        # remove observations in which the CF is missing or outside of (0,1), or where sample size is missing
-        obs = np.delete(obs, np.where((np.isnan(obs.cf)) | (obs.cf > 1) | (obs.cf < 0) | (np.isnan(obs.sample_size)))[0], axis=0)
+        # remove observations in which the CF is missing or outside of (0,1), or where sample size/envelope is missing
+        obs = np.delete(obs, np.where((np.isnan(obs.cf)) | (obs.cf > 1.) | (obs.cf < 0.) | (np.isnan(obs.sample_size)) | (obs.sample_size < 1.) | np.isnan(obs.envelope))[0], axis=0)
 
         # make lists of all the countries/regions/ages/years to predict for
         self.country_list = np.unique(all.country)
@@ -229,6 +229,10 @@ class codmod:
 
         # finally, any CF that is still 0 or 1 after the above corrections should simply be dropped
         obs = np.delete(obs, np.where((obs.cf == 0.) | (obs.cf == 1.))[0], axis=0)
+        
+        # we treat our envelope as truth, so never allow sample size to exceed it
+        shrink_me = np.where(obs.sample_size > obs.envelope*.999)[0]
+        obs.sample_size[shrink_me] = obs.envelope[shrink_me]*.999
         
         # make covariate matrices (including transformations and normalization)
         obs_vectors = [obs.country, obs.region, obs.super_region, obs.year, obs.age, obs.cf, obs.sample_size, obs.envelope, obs.pop, np.ones(obs.shape[0])]
@@ -290,7 +294,7 @@ class codmod:
             try:
                 pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/prediction_matrix_' + self.cause + '.csv')
                 pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/observation_matrix_' + self.cause + '.csv')
-            except:
+            except IOError:
                 print 'No cached data found.'
 
 
@@ -504,7 +508,10 @@ class codmod:
 
         # estimation of exposure based on coverage
         p = self.training_data.sample_size / self.training_data.envelope
-        E = mc.Binomial('E', n=self.training_data.envelope, p=p, value=self.training_data.sample_size)
+        self.p = p
+        self.n = np.round(self.training_data.envelope)
+        self.v = np.round(self.training_data.sample_size)
+        E = mc.Binomial('E', n=np.round(self.training_data.envelope), p=p, value=np.round(self.training_data.sample_size))
 
         # parameter predictions
         @mc.deterministic

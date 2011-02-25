@@ -12,6 +12,8 @@ from scipy import interpolate
 from pymc.Matplot import plot as mcplot
 import matplotlib as plot
 import numpy.lib.recfunctions as recfunctions
+import threadpool
+threadpool.set_threadpool_size(4)
 #import gradient_samplers as gs
 
 class codmod:
@@ -479,6 +481,30 @@ class codmod:
         pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in c_list]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
+        def interpolate_grid(x, pi_samples, x_index, a_by_x, t_by_x, pi_output):
+            interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[x], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+            pi_interpolated = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+            pi_output[x_index[x]] = pi_interpolated[a_by_x[x],t_by_x[x]]      
+        
+        @mc.deterministic
+        def pi_s(pi_samples=pi_s_samples):
+            pi_s = np.zeros(self.training_data.shape[0])
+            threadpool.map_noreturn(interpolate_grid, [(s, pi_samples, s_index, a_by_s, t_by_s, pi_s) for s in s_list])
+            return pi_s
+        
+        @mc.deterministic
+        def pi_r(pi_samples=pi_r_samples):
+            pi_r = np.zeros(self.training_data.shape[0])
+            threadpool.map_noreturn(interpolate_grid, [(r, pi_samples, r_index, a_by_r, t_by_r, pi_r) for r in r_list])
+            return pi_r
+            
+        @mc.deterministic
+        def pi_c(pi_samples=pi_c_samples):
+            pi_c = np.zeros(self.training_data.shape[0])
+            threadpool.map_noreturn(interpolate_grid, [(c, pi_samples, c_index, a_by_c, t_by_c, pi_c) for c in c_list])
+            return pi_c
+        
+        '''
         @mc.deterministic
         def pi_s(pi_samples=pi_s_samples):
             pi_s = np.zeros(self.training_data.shape[0])
@@ -505,12 +531,10 @@ class codmod:
                 pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
                 pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
             return pi_c
+        '''
 
         # estimation of exposure based on coverage
         p = self.training_data.sample_size / self.training_data.envelope
-        self.p = p
-        self.n = np.round(self.training_data.envelope)
-        self.v = np.round(self.training_data.sample_size)
         E = mc.Binomial('E', n=np.round(self.training_data.envelope), p=p, value=np.round(self.training_data.sample_size))
 
         # parameter predictions
@@ -519,8 +543,11 @@ class codmod:
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
+        @mc.deterministic
+        def alpha(rho=rho):
+            return 10.**rho
         @mc.observed
-        def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=10.**rho):
+        def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=alpha):
             if alpha >= 10**10:
                 return mc.poisson_like(value, mu)
             else:
@@ -531,7 +558,8 @@ class codmod:
         # create a pickle backend to store the model
         import time as tm
         dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
-        self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
+        #self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
+        self.mod_mc = mc.MCMC(vars(), db='ram')
 
         # MCMC step methods
         self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.rho, self.mod_mc.E, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])

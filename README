@@ -2,7 +2,7 @@ CoDMod 2 - Modeling Cause-Specific Death Rates
 
 Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
 
-    where   s: super-region
+    where	s: super-region
             r: region
             c: country
             t: year
@@ -12,22 +12,23 @@ Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
 
     mu_c,t,a    ~ exp(beta*X_c,t,a + ln(E) + pi_s + pi_r + pi_c + e_c,t,a)
 
-        beta    ~ fixed effects (coefficients on covariates)
-                  Laplace with Mean = 0
-        X_c,t,a ~ covariates (by country/year/age)
+                beta    ~ fixed effects (coefficients on covariates)
+                          Laplace with Mean = 0
+                X_c,t,a ~ covariates (by country/year/age)
 
-        E       ~ exposure (total number of all-cause deaths observed)
+                E       ~ exposure (total number of all-cause deaths observed)
+                          Binomial(n = total deaths in country, p = proportion recorded in study)
+                
+                pi_s    ~ 'random effect' by super-region
+                          year*age grid of offsets
+                          sampled from MVN with matern covariance then interpolated via cubic spline
+                pi_r    ~ 'random effect' by region
+                          year*age grid of offsets
+                          sampled from MVN with matern covariance then interpolated via cubic spline
+                pi_c    ~ 'random effect' by country
+                          year*age grid of offsets
+                          sampled from MVN with matern covariance then interpolated via cubic spline
 
-        pi_s    ~ 'random effect' by super-region
-                  year*age grid of offsets
-                  sampled from MVN with matern covariance then interpolated via cubic spline
-        pi_r    ~ 'random effect' by region
-                  year*age grid of offsets
-                  sampled from MVN with matern covariance then interpolated via cubic spline
-        pi_c    ~ 'random effect' by country
-                  year*age grid of offsets
-                  sampled from MVN with matern covariance then interpolated via cubic spline
-
-        e_c,t,a ~ error
+                e_c,t,a ~ error
 
     alpha       ~ overdispersion parameter

@@ -481,30 +481,6 @@ class codmod:
         pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in c_list]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
-        def interpolate_grid(x, pi_samples, x_index, a_by_x, t_by_x, pi_output):
-            interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[x], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-            pi_interpolated = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-            pi_output[x_index[x]] = pi_interpolated[a_by_x[x],t_by_x[x]]      
-        
-        @mc.deterministic
-        def pi_s(pi_samples=pi_s_samples):
-            pi_s = np.zeros(self.training_data.shape[0])
-            threadpool.map_noreturn(interpolate_grid, [(s, pi_samples, s_index, a_by_s, t_by_s, pi_s) for s in s_list])
-            return pi_s
-        
-        @mc.deterministic
-        def pi_r(pi_samples=pi_r_samples):
-            pi_r = np.zeros(self.training_data.shape[0])
-            threadpool.map_noreturn(interpolate_grid, [(r, pi_samples, r_index, a_by_r, t_by_r, pi_r) for r in r_list])
-            return pi_r
-            
-        @mc.deterministic
-        def pi_c(pi_samples=pi_c_samples):
-            pi_c = np.zeros(self.training_data.shape[0])
-            threadpool.map_noreturn(interpolate_grid, [(c, pi_samples, c_index, a_by_c, t_by_c, pi_c) for c in c_list])
-            return pi_c
-        
-        '''
         @mc.deterministic
         def pi_s(pi_samples=pi_s_samples):
             pi_s = np.zeros(self.training_data.shape[0])
@@ -531,7 +507,6 @@ class codmod:
                 pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
                 pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
             return pi_c
-        '''
 
         # estimation of exposure based on coverage
         p = self.training_data.sample_size / self.training_data.envelope

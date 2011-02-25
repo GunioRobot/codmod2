@@ -6,6 +6,7 @@ Purpose:    Fit cause of death models over space, time, and age
 
 import pymc as mc
 import numpy as np
+import pylab as pl
 import MySQLdb
 from scipy import interpolate
 from pymc.Matplot import plot as mcplot
@@ -150,10 +151,11 @@ class codmod:
         print 'Normalize Covariates:', self.normalize
 
 
-    def load(self):
+    def load(self, cache_data=False):
         '''
         Loads codmod data from the MySQL server.
         The resulting query will get all the data for a specified cause and sex, plus any covariates specified
+        If cache_data is True, then the results from this will be saved as csvs to make future debugging faster
         '''
         # make the sql covariate query
         covs = ''
@@ -283,6 +285,39 @@ class codmod:
         print 'Data Rows:', self.data_rows
         self.training_split()
 
+        # cache the data if requested
+        if cache_data == True:
+            try:
+                pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/prediction_matrix_' + self.cause + '.csv')
+                pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/observation_matrix_' + self.cause + '.csv')
+            except:
+                print 'No cached data found.'
+
+
+    def use_cache(self, dir='/home/j/Project/Causes of Death/CoDMod/tmp files/'):
+        ''' Use cached data from disk instead of querying mysql for the latest version '''
+        self.prediction_matrix = pl.csv2rec(dir + 'prediction_matrix_' + self.cause + '.csv')
+        self.observation_matrix = pl.csv2rec(dir + 'observation_matrix_' + self.cause + '.csv')
+        self.data_rows = self.observation_matrix.shape[0]
+        self.country_list = np.unique(self.prediction_matrix.country)
+        self.region_list = np.unique(self.prediction_matrix.region)
+        self.super_region_list = np.unique(self.prediction_matrix.super_region)
+        self.age_list = np.unique(self.prediction_matrix.age)
+        self.year_list = np.unique(self.prediction_matrix.year)
+        self.covariate_dict = {'x0': 'constant'}
+        for i in range(len(self.covariate_list)):
+            self.covariate_dict['x' + str(i+1)] = self.covariate_list[i]
+        if self.age_dummies == True:
+            pre_ref = 1
+            for i,j in enumerate(self.age_list):
+                if j == self.age_ref:
+                    pre_ref = 0
+                elif pre_ref == 1:
+                    self.covariate_dict['x' + str(len(self.covariate_list)+i+1)] = 'Age ' + str(j)
+                else:
+                    self.covariate_dict['x' + str(len(self.covariate_list)+i)] = 'Age ' + str(j)
+        self.training_split()
+
 
     def training_split(self, holdout_unit='none', holdout_prop=.2):
         ''' Splits the data up into test and train subsets '''
@@ -314,7 +349,6 @@ class codmod:
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of countries'
         else:
             raise ValueError("The holdout unit must be either 'datapoint', 'country-year', or 'country'.")
-        
 
 
     def plot_data(self, country=''):
@@ -341,6 +375,7 @@ class codmod:
                         X_c,t,a ~ covariates (by country/year/age)
 
                         E       ~ exposure (total number of all-cause deaths observed)
+                                  Binomial(n = total deaths in country, p = proportion recorded in study)
                         
                         pi_s    ~ 'random effect' by super-region
                                   year*age grid of offsets
@@ -467,17 +502,18 @@ class codmod:
                 pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
             return pi_c
 
+        # estimation of exposure based on coverage
+        p = self.training_data.sample_size / self.training_data.envelope
+        E = mc.Binomial('E', n=self.training_data.envelope, p=p, value=self.training_data.sample_size)
+
         # parameter predictions
         @mc.deterministic
-        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=self.training_data.sample_size):
+        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=E):
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
-        @mc.deterministic
-        def alpha(rho=rho):
-            return 10.**rho
         @mc.observed
-        def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=alpha):
+        def data_likelihood(value=np.round(self.training_data.cf * self.training_data.sample_size), mu=param_pred, alpha=10.**rho):
             if alpha >= 10**10:
                 return mc.poisson_like(value, mu)
             else:
@@ -491,7 +527,7 @@ class codmod:
         self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
 
         # MCMC step methods
-        self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.rho, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])
+        self.mod_mc.use_step_method(mc.AdaptiveMetropolis, [self.mod_mc.beta, self.mod_mc.rho, self.mod_mc.E, self.mod_mc.sigma_s, self.mod_mc.sigma_r, self.mod_mc.sigma_c, self.mod_mc.tau_s, self.mod_mc.tau_r, self.mod_mc.tau_c])
         for s in s_list:
             self.mod_mc.use_step_method(mc.AdaptiveMetropolis, self.mod_mc.pi_s_samples[s], cov=np.array(C_s.value*.01))
         for r in r_list:

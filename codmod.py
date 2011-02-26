@@ -577,11 +577,9 @@ class codmod:
 
     def mcmc_diagnostics(self):
         ''' Make diagnostic plots of the MCMC chains '''
-        cd '/home/j/Project/Causes of Death/CoDMod/tmp'
         mc.Matplot.plot(self.mod_mc.beta, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
         mc.Matplot.plot(self.mod_mc, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
         mc.Matplot.autocorrelation(self.mod_mc.alpha, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
-        cd '/home/j/Project/Causes of Death/CoDMod/codmod2'
 
 
     def predict_test(self, save_csv=False):

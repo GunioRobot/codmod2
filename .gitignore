@@ -6,3 +6,6 @@
 *.bak
 mysql.cnf
 gradient_samplers/
+Thumbs.db
+*.pdf
+*.png

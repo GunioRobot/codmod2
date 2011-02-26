@@ -9,11 +9,9 @@ import numpy as np
 import pylab as pl
 import MySQLdb
 from scipy import interpolate
-from pymc.Matplot import plot as mcplot
 import matplotlib as plot
 import numpy.lib.recfunctions as recfunctions
-import threadpool
-threadpool.set_threadpool_size(4)
+import time as tm
 #import gradient_samplers as gs
 
 class codmod:
@@ -293,17 +291,17 @@ class codmod:
 
         # cache the data if requested
         if cache_data == True:
-            try:
-                pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/prediction_matrix_' + self.cause + '.csv')
-                pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/observation_matrix_' + self.cause + '.csv')
-            except IOError:
-                print 'No cached data found.'
+            pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
+            pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/observation_matrix_' + self.cause + '_' + self.sex + '.csv')
 
 
     def use_cache(self, dir='/home/j/Project/Causes of Death/CoDMod/tmp files/'):
         ''' Use cached data from disk instead of querying mysql for the latest version '''
-        self.prediction_matrix = pl.csv2rec(dir + 'prediction_matrix_' + self.cause + '.csv')
-        self.observation_matrix = pl.csv2rec(dir + 'observation_matrix_' + self.cause + '.csv')
+        try:
+            self.prediction_matrix = pl.csv2rec(dir + 'prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
+            self.observation_matrix = pl.csv2rec(dir + 'observation_matrix_' + self.cause + '_' + self.sex + '.csv')
+        except IOError:
+            raise IOError('No cached data found.')
         self.data_rows = self.observation_matrix.shape[0]
         self.country_list = np.unique(self.prediction_matrix.country)
         self.region_list = np.unique(self.prediction_matrix.region)
@@ -332,11 +330,13 @@ class codmod:
         if holdout_unit == 'none':
             self.training_data = self.observation_matrix
             self.test_data = self.observation_matrix
+            self.training_type = 'make predictions'
             print 'Fitting model to all data'
         elif holdout_unit == 'datapoint':
             data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            self.training_type = 'datapoint'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of datapoints'
         elif holdout_unit == 'country-year':
             country_years = [self.observation_matrix.country[i] + '_' + str(self.observation_matrix.year[i]) for i in self.data_rows]
@@ -345,6 +345,7 @@ class codmod:
                 data_flagged[np.where(country_years==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            self.training_type = 'country-year'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of country-years'
         elif holdout_unit == 'country':
             data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
@@ -352,6 +353,7 @@ class codmod:
                 data_flagged.holdout[np.where(country==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            self.training_type = 'country'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of countries'
         else:
             raise ValueError("The holdout unit must be either 'datapoint', 'country-year', or 'country'.")
@@ -419,21 +421,12 @@ class codmod:
         super_regions = self.super_region_list
         s_index = [np.where(self.training_data.super_region==s) for s in super_regions]
         s_list = range(len(super_regions))
-        self.super_region_lookup = {}
-        for s in s_list:
-            self.super_region_lookup[super_regions[s]] = s
         regions = self.region_list
         r_index = [np.where(self.training_data.region==r) for r in regions]
         r_list = range(len(regions))
-        self.region_lookup = {}
-        for r in r_list:
-            self.region_lookup[regions[r]] = r
         countries = self.country_list
         c_index = [np.where(self.training_data.country==c) for c in countries]
         c_list = range(len(countries))
-        self.country_lookup = {}
-        for c in c_list:
-            self.country_lookup[countries[c]] = c
         years = self.year_list
         t_index = dict([(t, i) for i, t in enumerate(years)])
         ages = self.age_list
@@ -482,30 +475,48 @@ class codmod:
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
         @mc.deterministic
-        def pi_s(pi_samples=pi_s_samples):
-            pi_s = np.zeros(self.training_data.shape[0])
+        def pi_s_list(pi_samples=pi_s_samples):
+            pi_s_list = []
             for s in s_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[s], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_s_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-                pi_s[s_index[s]] = pi_s_grid[a_by_s[s],t_by_s[s]]
+                pi_s_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
+            return pi_s_list
+
+        @mc.deterministic
+        def pi_s(pi_list=pi_s_list):
+            pi_s = np.zeros(self.training_data.shape[0])
+            for s in s_list:
+                pi_s[s_index[s]] = pi_list[s][a_by_s[s],t_by_s[s]]
             return pi_s
 
         @mc.deterministic
-        def pi_r(pi_samples=pi_r_samples):
-            pi_r = np.zeros(self.training_data.shape[0])
+        def pi_r_list(pi_samples=pi_r_samples):
+            pi_r_list = []
             for r in r_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_r_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-                pi_r[r_index[r]] = pi_r_grid[a_by_r[r],t_by_r[r]]
-            return pi_r
+                pi_r_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
+            return pi_r_list
 
         @mc.deterministic
-        def pi_c(pi_samples=pi_c_samples):
-            pi_c = np.zeros(self.training_data.shape[0])
+        def pi_r(pi_list=pi_r_list):
+            pi_r = np.zeros(self.training_data.shape[0])
+            for r in r_list:
+                pi_r[r_index[r]] = pi_list[r][a_by_r[r],t_by_r[r]]
+            return pi_r
+        
+        @mc.deterministic
+        def pi_c_list(pi_samples=pi_c_samples):
+            pi_c_list = []
             for c in c_list:
                 interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_c_grid = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-                pi_c[c_index[c]] = pi_c_grid[a_by_c[c],t_by_c[c]]
+                pi_c_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
+            return pi_c_list
+
+        @mc.deterministic
+        def pi_c(pi_list=pi_c_list):
+            pi_c = np.zeros(self.training_data.shape[0])
+            for c in c_list:
+                pi_c[c_index[c]] = pi_list[c][a_by_c[c],t_by_c[c]]
             return pi_c
 
         # estimation of exposure based on coverage
@@ -531,7 +542,6 @@ class codmod:
                 return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
-        import time as tm
         dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
         #self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
         self.mod_mc = mc.MCMC(vars(), db='ram')
@@ -567,7 +577,69 @@ class codmod:
 
     def mcmc_diagnostics(self):
         ''' Make diagnostic plots of the MCMC chains '''
-        mcplot(self.mod_mc)
+        mc.Matplot.plot(self.mod_mc.beta, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
+        mc.Matplot.plot(self.mod_mc, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
+        mc.Matplot.autocorrelation(self.mod_mc, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
+
+
+    def predict_test(self, save_csv=False):
+        ''' Use the MCMC traces to predict the test data '''
+        # setup constants
+        num_test_rows = self.test_data.shape[0]
+        num_iters = self.mod_mc.beta.trace().shape[0]
+        
+        # indices
+        t_index = dict([(t, i) for i, t in enumerate(self.year_list)])
+        a_index = dict([(a, i) for i, a in enumerate(self.age_list)])
+        
+        # fixed effects
+        X = np.array([self.test_data['x%d'%i] for i in range(self.mod_mc.beta.shape[0])])
+        BX = np.dot(self.mod_mc.beta.trace(), X)
+        
+        # exposure
+        if self.training_type == 'make predictions':
+            E = np.ones((num_iters, num_test_rows))*self.test_data.envelope
+        else:
+            E = np.random.binomial(np.round(self.test_data.envelope).astype('int'), (self.test_data.sample_size/self.test_data.envelope), (num_iters, num_test_rows))
+        
+        # pi_s
+        s_index = [np.where(self.test_data.super_region==s) for s in self.super_region_list]
+        t_by_s = [[t_index[self.test_data.year[j]] for j in s_index[s][0]] for s in range(len(self.super_region_list))]
+        a_by_s = [[a_index[self.test_data.age[j]] for j in s_index[s][0]] for s in range(len(self.super_region_list))]
+        pi_s = np.zeros((num_iters, num_test_rows))
+        for s in range(len(self.super_region_list)):
+            pi_s[:,s_index[s][0]] = self.mod_mc.pi_s_list.trace()[:,s][:,a_by_s[s],t_by_s[s]]
+
+        # pi_r
+        r_index = [np.where(self.test_data.region==r) for r in self.region_list]
+        t_by_r = [[t_index[self.test_data.year[j]] for j in r_index[r][0]] for r in range(len(self.region_list))]
+        a_by_r = [[a_index[self.test_data.age[j]] for j in r_index[r][0]] for r in range(len(self.region_list))]
+        pi_r = np.zeros((num_iters, num_test_rows))
+        for r in range(len(self.region_list)):
+            pi_r[:,r_index[r][0]] = self.mod_mc.pi_r_list.trace()[:,r][:,a_by_r[r],t_by_r[r]]
+        
+        # pi_c
+        c_index = [np.where(self.test_data.country==c) for c in self.country_list]
+        t_by_c = [[t_index[self.test_data.year[j]] for j in c_index[c][0]] for c in range(len(self.country_list))]
+        a_by_c = [[a_index[self.test_data.age[j]] for j in s_index[c][0]] for c in range(len(self.country_list))]
+        pi_c = np.zeros((num_iters, num_test_rows))
+        for c in range(len(self.country_list)):
+            pi_c[:,c_index[c][0]] = self.mod_mc.pi_c_list.trace()[:,c][:,a_by_c[c],t_by_c[c]]	
+        
+        # make predictions
+        predictions = np.exp(BX + np.log(E) + pi_s + pi_r + pi_c)
+        mean = predictions.mean(axis=0)
+        lower = np.percentile(predictions, 2.5, axis=0)
+        upper = np.percentile(predictions, 97.5, axis=0)
+        self.predictions = self.test_data[['country','region','super_region','year','age','pop']]
+        self.predictions = recfunctions.append_fields(self.predictions, 'mean', mean)
+        self.predictions = recfunctions.append_fields(self.predictions, 'lower', lower)
+        self.predictions = recfunctions.append_fields(self.predictions, 'upper', upper)
+        self.predictions = self.predictions.view(np.recarray)
+        
+        # save the predictions
+        if save_csv == True:
+            pl.rec2csv(self.predictions, '/home/j/Project/Causes of Death/CoDMod/tmp files/predictions_' + self.cause + '_' + self.sex + '_' + tm.strftime('%b%d_%I%M%p') + '.csv')
 
 
 def mysql_to_recarray(cursor, query):

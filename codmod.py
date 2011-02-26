@@ -291,11 +291,11 @@ class codmod:
 
         # cache the data if requested
         if cache_data == True:
-            pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
-            pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp files/observation_matrix_' + self.cause + '_' + self.sex + '.csv')
+            pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp/prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
+            pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp/observation_matrix_' + self.cause + '_' + self.sex + '.csv')
 
 
-    def use_cache(self, dir='/home/j/Project/Causes of Death/CoDMod/tmp files/'):
+    def use_cache(self, dir='/home/j/Project/Causes of Death/CoDMod/tmp/'):
         ''' Use cached data from disk instead of querying mysql for the latest version '''
         try:
             self.prediction_matrix = pl.csv2rec(dir + 'prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
@@ -542,7 +542,7 @@ class codmod:
                 return mc.negative_binomial_like(value, mu, alpha)
 
         # create a pickle backend to store the model
-        dbname = '/home/j/Project/Causes of Death/CoDMod/tmp files/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
+        dbname = '/home/j/Project/Causes of Death/CoDMod/tmp/codmod_' + self.cause + '_' + tm.strftime('%b%d_%I%M%p')
         #self.mod_mc = mc.MCMC(vars(), db=mc.database.pickle, dbname=dbname)
         self.mod_mc = mc.MCMC(vars(), db='ram')
 
@@ -577,9 +577,11 @@ class codmod:
 
     def mcmc_diagnostics(self):
         ''' Make diagnostic plots of the MCMC chains '''
+        cd '/home/j/Project/Causes of Death/CoDMod/tmp'
         mc.Matplot.plot(self.mod_mc.beta, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
         mc.Matplot.plot(self.mod_mc, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
-        mc.Matplot.autocorrelation(self.mod_mc, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
+        mc.Matplot.autocorrelation(self.mod_mc.alpha, format='pdf', path='/home/j/Project/Causes of Death/CoDMod/tmp/')
+        cd '/home/j/Project/Causes of Death/CoDMod/codmod2'
 
 
     def predict_test(self, save_csv=False):
@@ -621,7 +623,7 @@ class codmod:
         # pi_c
         c_index = [np.where(self.test_data.country==c) for c in self.country_list]
         t_by_c = [[t_index[self.test_data.year[j]] for j in c_index[c][0]] for c in range(len(self.country_list))]
-        a_by_c = [[a_index[self.test_data.age[j]] for j in s_index[c][0]] for c in range(len(self.country_list))]
+        a_by_c = [[a_index[self.test_data.age[j]] for j in c_index[c][0]] for c in range(len(self.country_list))]
         pi_c = np.zeros((num_iters, num_test_rows))
         for c in range(len(self.country_list)):
             pi_c[:,c_index[c][0]] = self.mod_mc.pi_c_list.trace()[:,c][:,a_by_c[c],t_by_c[c]]	

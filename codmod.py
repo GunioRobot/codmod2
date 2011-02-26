@@ -329,7 +329,7 @@ class codmod:
             raise ValueError('The holdout proportion must be between .1 and .99.')
         if holdout_unit == 'none':
             self.training_data = self.observation_matrix
-            self.test_data = self.observation_matrix
+            self.test_data = self.prediction_matrix
             self.training_type = 'make predictions'
             print 'Fitting model to all data'
         elif holdout_unit == 'datapoint':

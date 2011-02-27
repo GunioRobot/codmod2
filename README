@@ -1,8 +1,8 @@
 CoDMod 2 - Modeling Cause-Specific Death Rates
 
-Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
+Y_c,t,a ~ NegativeBinomial(mu_c,t,a, alpha)
 
-    where	s: super-region
+    where   s: super-region
             r: region
             c: country
             t: year

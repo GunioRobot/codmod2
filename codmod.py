@@ -333,22 +333,22 @@ class codmod:
             self.training_type = 'make predictions'
             print 'Fitting model to all data'
         elif holdout_unit == 'datapoint':
-            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, (self.data_rows,1)))
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, self.data_rows))
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
             self.training_type = 'datapoint'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of datapoints'
         elif holdout_unit == 'country-year':
-            country_years = [self.observation_matrix.country[i] + '_' + str(self.observation_matrix.year[i]) for i in self.data_rows]
-            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
+            country_years = [self.observation_matrix.country[i] + '_' + str(self.observation_matrix.year[i]) for i in range(self.data_rows)]
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros(self.data_rows)).view(np.recarray)
             for i in np.unique(country_years):
-                data_flagged[np.where(country_years==i)[0]] = np.random.binomial(1, holdout_prop)
+                data_flagged.holdout[np.where(data_flagged.country + '_' + data_flagged.year.astype('|S4')==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
             self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
             self.training_type = 'country-year'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of country-years'
         elif holdout_unit == 'country':
-            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros((self.data_rows,1)))
+            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.zeros(self.data_rows)).view(np.recarray)
             for i in self.country_list:
                 data_flagged.holdout[np.where(country==i)[0]] = np.random.binomial(1, holdout_prop)
             self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
@@ -366,9 +366,9 @@ class codmod:
 
     def initialize_model(self, find_start_vals=True):
         '''
-        Y_c,t,a ~ Negative Binomial(mu_c,t,a, alpha)
+        Y_c,t,a ~ NegativeBinomial(mu_c,t,a, alpha)
 
-            where	s: super-region
+            where   s: super-region
                     r: region
                     c: country
                     t: year
@@ -567,12 +567,12 @@ class codmod:
                 print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
 
 
-    def sample(self, iter=5000, burn=1000, thin=5, verbose=1, chains=1):
+    def sample(self, iter=5000, burn=1000, thin=5, verbose=1):
         ''' Use MCMC to sample from the posterior '''
-        if chains==1:
+        try:
             self.mod_mc.sample(iter=iter, burn=burn, thin=thin, verbose=verbose)
-        else:
-            raise ValueError('Only 1 chain implemented at this time.')
+        except MemoryError:
+            print 'MemoryError... trying to just continue with whatever we were able to get for now...'
 
 
     def mcmc_diagnostics(self):
@@ -609,6 +609,7 @@ class codmod:
         pi_s = np.zeros((num_iters, num_test_rows))
         for s in range(len(self.super_region_list)):
             pi_s[:,s_index[s][0]] = self.mod_mc.pi_s_list.trace()[:,s][:,a_by_s[s],t_by_s[s]]
+        self.test_s_index = s_index
 
         # pi_r
         r_index = [np.where(self.test_data.region==r) for r in self.region_list]
@@ -617,6 +618,7 @@ class codmod:
         pi_r = np.zeros((num_iters, num_test_rows))
         for r in range(len(self.region_list)):
             pi_r[:,r_index[r][0]] = self.mod_mc.pi_r_list.trace()[:,r][:,a_by_r[r],t_by_r[r]]
+        self.test_r_index = r_index
         
         # pi_c
         c_index = [np.where(self.test_data.country==c) for c in self.country_list]
@@ -625,6 +627,7 @@ class codmod:
         pi_c = np.zeros((num_iters, num_test_rows))
         for c in range(len(self.country_list)):
             pi_c[:,c_index[c][0]] = self.mod_mc.pi_c_list.trace()[:,c][:,a_by_c[c],t_by_c[c]]	
+        self.test_c_index = c_index
         
         # make predictions
         predictions = np.exp(BX + np.log(E) + pi_s + pi_r + pi_c)
@@ -632,14 +635,66 @@ class codmod:
         lower = np.percentile(predictions, 2.5, axis=0)
         upper = np.percentile(predictions, 97.5, axis=0)
         self.predictions = self.test_data[['country','region','super_region','year','age','pop']]
-        self.predictions = recfunctions.append_fields(self.predictions, 'mean', mean)
-        self.predictions = recfunctions.append_fields(self.predictions, 'lower', lower)
-        self.predictions = recfunctions.append_fields(self.predictions, 'upper', upper)
+        self.predictions = recfunctions.append_fields(self.predictions, 'mean_deaths', mean)
+        self.predictions = recfunctions.append_fields(self.predictions, 'lower_deaths', lower)
+        self.predictions = recfunctions.append_fields(self.predictions, 'upper_deaths', upper)
+        if self.training_type != 'make predictions':
+            self.predictions = recfunctions.append_fields(self.predictions, 'actual_deaths', self.test_data.cf*self.test_data.envelope)
         self.predictions = self.predictions.view(np.recarray)
         
         # save the predictions
         if save_csv == True:
-            pl.rec2csv(self.predictions, '/home/j/Project/Causes of Death/CoDMod/tmp files/predictions_' + self.cause + '_' + self.sex + '_' + tm.strftime('%b%d_%I%M%p') + '.csv')
+            pl.rec2csv(self.predictions, '/home/j/Project/Causes of Death/CoDMod/tmp/predictions_' + self.cause + '_' + self.sex + '_' + tm.strftime('%b%d_%I%M%p') + '.csv')
+
+
+    def measure_fit(self):
+        ''' Provide metrics of fit to determine how well the model performed '''
+        # load in age weights
+        age_weights = mysql_to_recarray(self.cursor, 'SELECT age,weight FROM age_weights;')
+        age_weights = recfunctions.append_fields(age_weights, 'keep', np.zeros(age_weights.shape[0])).view(np.recarray)
+        for a in self.age_list:
+            age_weights.keep[np.where(age_weights.age==a)[0]] = 1
+        age_weights = np.delete(age_weights, np.where(age_weights.keep==0)[0], axis=0)
+        age_weights.weight = age_weights.weight/age_weights.weight.sum()
+        
+        # TODO: code up RMSE for non-holdout predictions
+        if self.training_type == 'make predictions':
+            print 'RMSE for non-holdout data not yet implemented'
+        
+        # calculate age-adjusted rates on the test data
+        else:
+            predicted = self.test_data[['country','year','age','envelope','pop','cf', 'mean', 'upper', 'lower']]
+            predicted = recfunctions.append_fields(predicted, 'mean_rate', predicted.mean_deaths / predicted.pop * 100000.)
+            predicted = recfunctions.append_fields(predicted, 'actual_rate', predicted.actual_deaths / predicted.pop * 100000.)
+            predicted = recfunctions.append_fields(predicted, 'weight', np.ones(predicted.shape[0])).view(np.recarray)
+            for a in self.age_list:
+                predicted.weight[np.where(predicted.age==a)[0]] = age_weights.weight[np.where(age_weights.age==a)[0]]
+            predicted.mean_rate = predicted.mean_rate * predicted.weight
+            predicted.actual_rate = predicted.actual_rate * predicted.weight
+            from matplotlib import mlab
+            adj_rates = mlab.rec_groupby(predicted, ('country','year'), (('mean_rate', np.sum, 'adj_mean_rate'),('actual_rate', np.sum, 'adj_actual_rate')))
+            
+            # calculate RMSE/RMdSE
+            error = adj_rates.adj_mean_rate - adj_rates.adj_actual_rate
+            sqerr = error ** 2.
+            mse = np.mean(sqerror)
+            mdse = np.median(sqerror)
+            rmse = np.sqrt(mse)
+            rmdse = np.sqrt(mdse)
+            
+            # calculate AARE/MdARE
+            abs_rel_error = np.abs(error / adj_rates.adj_actual_rate)
+            aare = np.mean(abs_rel_error)
+            mdare = np.median(abs_rel_error)
+            
+            # calculate coverage (age-specific, not age-adjusted)
+            coverage = np.array((predicted.upper >= predicted.actual_deaths) and (predicted.lower <= predicted.actual_deaths)).astype(np.int).mean()
+            
+            # output fit metrics
+            print 'Root Mean Square Error: ' + str(rmse), '\nRoot Median Square Error: ' + str(rmdse), '\nAverage Absolute Relative Error: ' + str(aare), '\nMedian Absolute Relative Error: ' + str(mdare), '\nCoverage: ' + str(coverage)
+            pl.rec2csv(np.core.records.fromarrays([np.array('rmse','rmdse','aare','mdare','coverage'),np.array(rmse,rmdse,aare,mdare,coverage)], names=['metric','value']), '/home/j/Project/Causes of Death/CoDMod/tmp/fits_' + self.cause + '_' + self.sex + '_' + tm.strftime('%b%d_%I%M%p') + '.csv')
+
+                
 
 
 def mysql_to_recarray(cursor, query):

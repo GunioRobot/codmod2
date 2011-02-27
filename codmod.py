@@ -342,9 +342,9 @@ class codmod:
             self.training_type = 'make predictions'
             print 'Fitting model to all data'
         elif holdout_unit == 'datapoint':
-            data_flagged = recfunctions.append_fields(self.observation_matrix, 'holdout', np.random.binomial(1, holdout_prop, self.data_rows))
-            self.training_data = np.delete(data_flagged, np.where(data_flagged.holdout==1)[0], axis=0)
-            self.test_data = np.delete(data_flagged, np.where(data_flagged.holdout==0)[0], axis=0)
+            holdouts = np.random.binomial(1, holdout_prop, self.data_rows)
+            self.training_data = np.delete(self.observation_matrix, np.where(holdouts==1)[0], axis=0)
+            self.test_data = np.delete(self.observation_matrix, np.where(holdouts==0)[0], axis=0)
             self.training_type = 'datapoint'
             print 'Fitting model to ' + str((1-holdout_prop)*100) + '% of datapoints'
         elif holdout_unit == 'country-year':

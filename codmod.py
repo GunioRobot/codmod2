@@ -604,7 +604,7 @@ class codmod:
         a_index = dict([(a, i) for i, a in enumerate(self.age_list)])
 
         # fixed effects
-        X = np.array([self.test_data['x%d'%i] for i in range(self.mod_mc.beta.shape[0])])
+        X = np.array([self.test_data['x%d'%i] for i in range(self.mod_mc.beta.value.shape[0])])
         BX = np.dot(self.mod_mc.beta.trace(), X)
 
         # exposure
@@ -641,10 +641,13 @@ class codmod:
         self.test_c_index = c_index
 
         # make predictions
+        import os
+        os.chdir('/home/j/Project/Causes of Death/CoDMod/codmod2/')
+        import percentile
         predictions = np.exp(BX + np.log(E) + pi_s + pi_r + pi_c)
         mean = predictions.mean(axis=0)
-        lower = np.percentile(predictions, 2.5, axis=0)
-        upper = np.percentile(predictions, 97.5, axis=0)
+        lower = percentile.percentile(predictions, 2.5, axis=0)
+        upper = percentile.percentile(predictions, 97.5, axis=0)
         self.predictions = self.test_data[['country','region','super_region','year','age','pop']]
         self.predictions = recfunctions.append_fields(self.predictions, 'mean_deaths', mean)
         self.predictions = recfunctions.append_fields(self.predictions, 'lower_deaths', lower)

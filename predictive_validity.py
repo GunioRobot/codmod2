@@ -14,6 +14,7 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
     # write a file to run each test
     f = open('/home/j/Project/Causes of Death/CoDMod/tmp/maternal_' + tname + '.py', 'w')
     f.write("import os" + "\n")
+    f.write("os.system('hostname')" + "\n")
     f.write("os.chdir('/home/j/Project/Causes of Death/CoDMod/codmod2')" + "\n")
     f.write("import codmod as cm" + "\n")
     f.write("m = cm.codmod('Ab10','female','maternal_" + tname + "')" + "\n")
@@ -40,4 +41,4 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
     f.close()
     
     # submit the jobs to the cluster
-    os.system("qsub -q all.q@ihme001,all.q@ihme001,all.q@ihme002,all.q@ihme003,all.q@ihme004,all.q@ihme005,all.q@ihme006,all.q@ihme007,all.q@ihme008,all.q@ihme009,all.q@ihme010,all.q@ihme011,all.q@ihme012,all.q@ihme013,all.q@ihme015,all.q@ihme016,all.q@ihme017,all.q@ihme018,all.q@ihme019,all.q@ihme020,all.q@ihme021,all.q@ihme022,all.q@ihme023,all.q@ihme024,all.q@ihme025,all.q@ihme026,all.q@ihme027,all.q@ihme028,all.q@ihme029,all.q@ihme030,all.q@ihme031,all.q@ihme032,all.q@ihme033,all.q@ihme034,all.q@ihme035,all.q@ihme036,all.q@ihme037 -l mem_free=10G '/home/j/Project/Causes of Death/CoDMod/tmp/run_maternal_" + tname + ".sh'")
+    os.system("qsub -q all.q@ihme001,all.q@ihme001,all.q@ihme002,all.q@ihme003,all.q@ihme004,all.q@ihme005,all.q@ihme006,all.q@ihme007,all.q@ihme008,all.q@ihme009,all.q@ihme010,all.q@ihme011,all.q@ihme012,all.q@ihme013,all.q@ihme015,all.q@ihme016,all.q@ihme017,all.q@ihme018,all.q@ihme019,all.q@ihme020,all.q@ihme021,all.q@ihme022,all.q@ihme023,all.q@ihme024,all.q@ihme025,all.q@ihme026,all.q@ihme027,all.q@ihme028,all.q@ihme029,all.q@ihme030,all.q@ihme031,all.q@ihme032,all.q@ihme033,all.q@ihme034,all.q@ihme035,all.q@ihme036,all.q@ihme037 -l mem_free=20G '/home/j/Project/Causes of Death/CoDMod/tmp/run_maternal_" + tname + ".sh'")

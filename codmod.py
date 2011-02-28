@@ -303,6 +303,15 @@ class codmod:
                 pl.rec2csv(self.prediction_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp/prediction_matrix_' + self.cause + '_' + self.sex + '.csv')
                 pl.rec2csv(self.observation_matrix, '/home/j/Project/Causes of Death/CoDMod/tmp/observation_matrix_' + self.cause + '_' + self.sex + '.csv')
 
+        # load in age weights for creating age adjusted rates later
+        age_weights = mysql_to_recarray(self.cursor, 'SELECT age,weight FROM age_weights;')
+        age_weights = recfunctions.append_fields(age_weights, 'keep', np.zeros(age_weights.shape[0])).view(np.recarray)
+        for a in self.age_list:
+            age_weights.keep[np.where(age_weights.age==a)[0]] = 1
+        age_weights = np.delete(age_weights, np.where(age_weights.keep==0)[0], axis=0)
+        age_weights.weight = age_weights.weight/age_weights.weight.sum()
+        self.age_weights = age_weights
+
 
     def use_cache(self, dir):
         ''' Use cached data from disk instead of querying mysql for the latest version '''
@@ -663,14 +672,6 @@ class codmod:
 
     def measure_fit(self):
         ''' Provide metrics of fit to determine how well the model performed '''
-        # load in age weights
-        age_weights = mysql_to_recarray(self.cursor, 'SELECT age,weight FROM age_weights;')
-        age_weights = recfunctions.append_fields(age_weights, 'keep', np.zeros(age_weights.shape[0])).view(np.recarray)
-        for a in self.age_list:
-            age_weights.keep[np.where(age_weights.age==a)[0]] = 1
-        age_weights = np.delete(age_weights, np.where(age_weights.keep==0)[0], axis=0)
-        age_weights.weight = age_weights.weight/age_weights.weight.sum()
-
         # TODO: code up RMSE for non-holdout predictions
         if self.training_type == 'make predictions':
             print 'RMSE for non-holdout data not yet implemented'
@@ -682,7 +683,7 @@ class codmod:
             predicted = recfunctions.append_fields(predicted, 'actual_rate', predicted.actual_deaths / predicted.pop * 100000.).view(np.recarray)
             predicted = recfunctions.append_fields(predicted, 'weight', np.ones(predicted.shape[0])).view(np.recarray)
             for a in self.age_list:
-                predicted.weight[np.where(predicted.age==a)[0]] = age_weights.weight[np.where(age_weights.age==a)[0]]
+                predicted.weight[np.where(predicted.age==a)[0]] = self.age_weights.weight[np.where(self.age_weights.age==a)[0]]
             predicted.mean_rate = predicted.mean_rate * predicted.weight
             predicted.actual_rate = predicted.actual_rate * predicted.weight
             from matplotlib import mlab

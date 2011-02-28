@@ -262,8 +262,10 @@ class codmod:
                     a = a**2
                     o = o**2
                 if self.normalize == True:
-                    a = ((a-np.mean(a))/np.std(a))
-                    o = ((o-np.mean(a))/np.std(a))
+                    cov_mean = np.mean(a)
+                    cov_sd = np.std(a)
+                    a = ((a-cov_mean)/cov_sd)
+                    o = ((o-cov_mean)/cov_sd)
                 all_vectors.append(a)
                 all_names.append('x' + str(i+1))
                 obs_vectors.append(o)

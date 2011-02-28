@@ -1,6 +1,6 @@
 '''
 Author:	    Kyle Foreman
-Date:	    22 February 2011
+Date:	    27 February 2011
 Purpose:    Fit cause of death models over space, time, and age
 '''
 
@@ -263,7 +263,7 @@ class codmod:
                     o = o**2
                 if self.normalize == True:
                     a = ((a-np.mean(a))/np.std(a))
-                    o = ((o-np.mean(o))/np.std(o))
+                    o = ((o-np.mean(a))/np.std(a))
                 all_vectors.append(a)
                 all_names.append('x' + str(i+1))
                 obs_vectors.append(o)
@@ -617,10 +617,13 @@ class codmod:
         BX = np.dot(self.mod_mc.beta.trace(), X)
 
         # exposure
+        '''
         if self.training_type == 'make predictions':
             E = np.ones((num_iters, num_test_rows))*self.test_data.envelope
         else:
             E = np.random.binomial(np.round(self.test_data.envelope).astype('int'), (self.test_data.sample_size/self.test_data.envelope), (num_iters, num_test_rows))
+        '''
+        E = np.ones((num_iters, num_test_rows))*self.test_data.envelope
 
         # pi_s
         s_index = [np.where(self.test_data.super_region==s) for s in self.super_region_list]
@@ -708,7 +711,6 @@ class codmod:
             # output fit metrics
             print 'Root Mean Square Error: ' + str(rmse), '\nRoot Median Square Error: ' + str(rmdse), '\nAverage Absolute Relative Error: ' + str(aare), '\nMedian Absolute Relative Error: ' + str(mdare), '\nCoverage: ' + str(coverage)
             pl.rec2csv(np.core.records.fromarrays([np.array(('rmse','rmdse','aare','mdare','coverage')),np.array((rmse,rmdse,aare,mdare,coverage))], names=['metric','value']), '/home/j/Project/Causes of Death/CoDMod/tmp/' + self.name + '_fits_' + self.cause + '_' + self.sex + '.csv')
-
 
 
 

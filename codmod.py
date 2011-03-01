@@ -1,18 +1,18 @@
 '''
 Author:	    Kyle Foreman
-Date:	    27 February 2011
+Date:	    28 February 2011
 Purpose:    Fit cause of death models over space, time, and age
 '''
 
+import matplotlib
+matplotlib.use("AGG") 
 import pymc as mc
 import numpy as np
 import pylab as pl
 import MySQLdb
 from scipy import interpolate
-import matplotlib as plot
 import numpy.lib.recfunctions as recfunctions
 import time as tm
-#import gradient_samplers as gs
 
 class codmod:
     '''

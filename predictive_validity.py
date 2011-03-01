@@ -1,6 +1,6 @@
 '''
 Author:     Kyle Foreman
-Date:       February 26, 2011
+Date:       February 28, 2011
 Purpose:    Run codmod2 on maternal for several different predictive validity tests
 '''
 
@@ -11,7 +11,7 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
         tname = 'predict'
     else:
         tname = t
-    
+
     # write a file to run each test
     f = open('/home/j/Project/Causes of Death/CoDMod/tmp/' + modname + '_' + tname + '.py', 'w')
     f.write("import os" + "\n")
@@ -25,7 +25,7 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
     f.write("m.load(use_cache=True)" + "\n")
     f.write("m.training_split(holdout_unit='" + t[:-1] + "', holdout_prop=.2)" + "\n")
     f.write("m.initialize_model(find_start_vals=True)" + "\n")
-    f.write("m.sample(iter=5000, burn=1000, thin=5)" + "\n")
+    f.write("m.sample(iter=4000, burn=0, thin=5)" + "\n")
     if tname == 'predict':
         f.write("m.predict_test(save_csv=True)" + "\n")
         f.write("m.mcmc_diagnostics()" + "\n")

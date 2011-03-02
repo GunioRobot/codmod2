@@ -4,7 +4,7 @@ Date:       February 28, 2011
 Purpose:    Run codmod2 on maternal for several different predictive validity tests
 '''
 
-modname = 'maternal'
+modname = 'shortrun'
 import os
 for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 'country-year3', 'datapoint1', 'datapoint2', 'datapoint3','none1']:
     if t[:-1] == 'none':
@@ -25,7 +25,7 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
     f.write("m.load(use_cache=True)" + "\n")
     f.write("m.training_split(holdout_unit='" + t[:-1] + "', holdout_prop=.2)" + "\n")
     f.write("m.initialize_model(find_start_vals=True)" + "\n")
-    f.write("m.sample(iter=4000, burn=0, thin=5)" + "\n")
+    f.write("m.sample(iter=100, burn=0, thin=1)" + "\n")
     if tname == 'predict':
         f.write("m.predict_test(save_csv=True)" + "\n")
         f.write("m.mcmc_diagnostics()" + "\n")

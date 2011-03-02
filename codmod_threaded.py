@@ -13,6 +13,7 @@ import MySQLdb
 from scipy import interpolate
 import numpy.lib.recfunctions as recfunctions
 import time as tm
+import threadpool
 
 class codmod:
     '''
@@ -384,7 +385,7 @@ class codmod:
             return something
 
 
-    def initialize_model(self, find_start_vals=True):
+    def initialize_model(self, find_start_vals=True, num_threads=1):
         '''
         Y_c,t,a ~ NegativeBinomial(mu_c,t,a, alpha)
 
@@ -494,13 +495,31 @@ class codmod:
         pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in c_list]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
+        def interpolate_grid(pi_samples, x_indices, pi_list):
+            for x in x_indices:
+                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[x], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+                pi_list[x] = interpolate.bisplev(x=ages, y=years, tck=interpolator)
+
+        def chunkify(x_list):
+            x_chunks = []
+            if len(x_list) < num_threads:
+                for x in x_list:
+                    x_chunks.append(list([x]))
+            else:
+                chunk_cuts = np.linspace(0, len(x_list), num_threads+1)
+                for n in range(num_threads):
+                    x_chunks.append(range(np.ceil(chunk_cuts[n]).astype(np.int), np.ceil(chunk_cuts[n+1]).astype(np.int)))
+            return x_chunks
+
+        s_chunks = chunkify(s_list)
+        r_chunks = chunkify(r_list)
+        c_chunks = chunkify(c_list)
+
         @mc.deterministic
-        def pi_s_list(pi_samples=pi_s_samples):
-            pi_s_list = []
-            for s in s_list:
-                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[s], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_s_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
-            return pi_s_list
+        def pi_s_list(pi_samples=pi_s_samples, list=s_list, chunks=s_chunks):
+            pi_list = list
+            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+            return pi_list
 
         @mc.deterministic
         def pi_s(pi_list=pi_s_list):
@@ -510,12 +529,10 @@ class codmod:
             return pi_s
 
         @mc.deterministic
-        def pi_r_list(pi_samples=pi_r_samples):
-            pi_r_list = []
-            for r in r_list:
-                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[r], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_r_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
-            return pi_r_list
+        def pi_r_list(pi_samples=pi_r_samples, list=r_list, chunks=r_chunks):
+            pi_list = list
+            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+            return pi_list
 
         @mc.deterministic
         def pi_r(pi_list=pi_r_list):
@@ -525,12 +542,10 @@ class codmod:
             return pi_r
         
         @mc.deterministic
-        def pi_c_list(pi_samples=pi_c_samples):
-            pi_c_list = []
-            for c in c_list:
-                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[c], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_c_list.append(interpolate.bisplev(x=ages, y=years, tck=interpolator))
-            return pi_c_list
+        def pi_c_list(pi_samples=pi_c_samples, list=c_list, chunks=c_chunks):
+            pi_list = list
+            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+            return pi_list
 
         @mc.deterministic
         def pi_c(pi_list=pi_c_list):

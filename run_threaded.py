@@ -1,12 +1,15 @@
 # load the codmod program
 import os
 os.chdir('/home/j/Project/Causes of Death/CoDMod/codmod2/')
-import codmod as cm
+import codmod_threaded as cm
 reload(cm)
 
 # setup multithreading
+num_threads = 18
 #import mkl
-#mkl.set_num_threads(1)
+#mkl.set_num_threads(num_threads)
+import threadpool
+threadpool.set_threadpool_size(num_threads)
 
 # setup the model
 m = cm.codmod('Ab10','female','maternal_test')
@@ -19,7 +22,7 @@ m.load(use_cache=True)
 m.training_split(holdout_unit='none')
 
 # build the model and use MAP to find starting values
-m.initialize_model(find_start_vals=True)
+m.initialize_model(find_start_vals=True, num_threads=num_threads)
 
 # use MCMC to find posterior
 m.sample(iter=1000, burn=0, thin=1)

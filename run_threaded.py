@@ -4,12 +4,9 @@ os.chdir('/home/j/Project/Causes of Death/CoDMod/codmod2/')
 import codmod_threaded as cm
 reload(cm)
 
+
 # setup multithreading
-num_threads = 18
-#import mkl
-#mkl.set_num_threads(num_threads)
-import threadpool
-threadpool.set_threadpool_size(num_threads)
+num_threads = 4
 
 # setup the model
 m = cm.codmod('Ab10','female','maternal_test')

@@ -13,7 +13,7 @@ import MySQLdb
 from scipy import interpolate
 import numpy.lib.recfunctions as recfunctions
 import time as tm
-import threadpool
+from multiprocessing import Pool
 
 class codmod:
     '''
@@ -495,30 +495,17 @@ class codmod:
         pi_c_samples = [mc.MvNormalCov('pi_c_%s'%c, np.zeros(sample_points.shape[0]), C_c, value=np.zeros(sample_points.shape[0])) for c in c_list]
 
         # interpolate to create the complete random effect matrices, then convert into 1d arrays
-        def interpolate_grid(pi_samples, x_indices, pi_list):
-            for x in x_indices:
-                interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples[x], xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
-                pi_list[x] = interpolate.bisplev(x=ages, y=years, tck=interpolator)
-
-        def chunkify(x_list):
-            x_chunks = []
-            if len(x_list) < num_threads:
-                for x in x_list:
-                    x_chunks.append(list([x]))
-            else:
-                chunk_cuts = np.linspace(0, len(x_list), num_threads+1)
-                for n in range(num_threads):
-                    x_chunks.append(range(np.ceil(chunk_cuts[n]).astype(np.int), np.ceil(chunk_cuts[n+1]).astype(np.int)))
-            return x_chunks
-
-        s_chunks = chunkify(s_list)
-        r_chunks = chunkify(r_list)
-        c_chunks = chunkify(c_list)
+        def interpolate_grid(pi_samples):
+            interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples, xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
+            return interpolate.bisplev(x=ages, y=years, tck=interpolator)
 
         @mc.deterministic
-        def pi_s_list(pi_samples=pi_s_samples, list=s_list, chunks=s_chunks):
-            pi_list = list
-            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+        def pi_s_list(pi_samples=pi_s_samples):
+            P = Pool(num_threads)
+            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
+            pi_list = interp.get()
+            P.close()
+            P.join()
             return pi_list
 
         @mc.deterministic
@@ -529,9 +516,12 @@ class codmod:
             return pi_s
 
         @mc.deterministic
-        def pi_r_list(pi_samples=pi_r_samples, list=r_list, chunks=r_chunks):
-            pi_list = list
-            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+        def pi_r_list(pi_samples=pi_r_samples):
+            P = Pool(num_threads)
+            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
+            pi_list = interp.get()
+            P.close()
+            P.join()
             return pi_list
 
         @mc.deterministic
@@ -542,9 +532,12 @@ class codmod:
             return pi_r
         
         @mc.deterministic
-        def pi_c_list(pi_samples=pi_c_samples, list=c_list, chunks=c_chunks):
-            pi_list = list
-            threadpool.map_noreturn(interpolate_grid, [(pi_samples, chunk, pi_list) for chunk in chunks])
+        def pi_c_list(pi_samples=pi_c_samples):
+            P = Pool(num_threads)
+            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
+            pi_list = interp.get()
+            P.close()
+            P.join()
             return pi_list
 
         @mc.deterministic
@@ -600,7 +593,6 @@ class codmod:
                 print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
                 mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
                 print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-
 
     def sample(self, iter=5000, burn=1000, thin=5, verbose=1):
         ''' Use MCMC to sample from the posterior '''
@@ -689,7 +681,6 @@ class codmod:
         if save_csv == True:
             pl.rec2csv(self.predictions, '/home/j/Project/Causes of Death/CoDMod/tmp/' + self.name + '_predictions_' + self.cause + '_' + self.sex + '.csv')
 
-
     def measure_fit(self):
         ''' Provide metrics of fit to determine how well the model performed '''
         # TODO: code up RMSE for non-holdout predictions
@@ -750,4 +741,3 @@ def mysql_to_recarray(cursor, query):
             cols[i][1] = '<S' + str(str_l)
     cols = [(cols[i][0], cols[i][1]) for i in range(len(cols))]
     return np.array(data, dtype=cols).view(np.recarray)
-

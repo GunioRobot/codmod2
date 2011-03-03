@@ -498,15 +498,21 @@ class codmod:
         def interpolate_grid(pi_samples):
             interpolator = interpolate.bisplrep(x=sample_points[:,0], y=sample_points[:,1], z=pi_samples, xb=ages[0], xe=ages[-1], yb=years[0], ye=years[-1], kx=kx, ky=ky)
             return interpolate.bisplev(x=ages, y=years, tck=interpolator)
-
-        @mc.deterministic
-        def pi_s_list(pi_samples=pi_s_samples):
+        
+        def find_pi(pi_samples):
             P = Pool(num_threads)
-            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
+            interp = P.map_async(interpolate_grid, pi_samples, chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
             pi_list = interp.get()
             P.close()
             P.join()
             return pi_list
+
+        @mc.deterministic
+        def pi_s_list(pi_samples=pi_s_samples):
+            flattened = []
+            for p in range(len(pi_samples)):
+                flattened.append(pi_samples[p].tolist())
+            return find_pi(flattened)
 
         @mc.deterministic
         def pi_s(pi_list=pi_s_list):
@@ -517,12 +523,10 @@ class codmod:
 
         @mc.deterministic
         def pi_r_list(pi_samples=pi_r_samples):
-            P = Pool(num_threads)
-            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
-            pi_list = interp.get()
-            P.close()
-            P.join()
-            return pi_list
+            flattened = []
+            for p in range(len(pi_samples)):
+                flattened.append(pi_samples[p].tolist())
+            return find_pi(flattened)
 
         @mc.deterministic
         def pi_r(pi_list=pi_r_list):
@@ -533,12 +537,10 @@ class codmod:
         
         @mc.deterministic
         def pi_c_list(pi_samples=pi_c_samples):
-            P = Pool(num_threads)
-            interp = P.map_async(interpolate_grid, [(s, sample_points, ages, years, kx, ky) for s in pi_samples], chunksize=np.ceil(len(pi_samples)/num_threads).astype(np.int))
-            pi_list = interp.get()
-            P.close()
-            P.join()
-            return pi_list
+            flattened = []
+            for p in range(len(pi_samples)):
+                flattened.append(pi_samples[p].tolist())
+            return find_pi(flattened)
 
         @mc.deterministic
         def pi_c(pi_list=pi_c_list):

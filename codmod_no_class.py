@@ -16,6 +16,7 @@ import time as tm
 from multiprocessing import Pool
 
 # setup parameters
+name = 'threadtest'
 cause = 'Ab10'
 sex = 'female'
 age_range = [15,45]
@@ -28,7 +29,11 @@ age_ref = 30
 normalize = True
 holdout_unit = 'none'
 holdout_prop = .2
-num_threads = 4
+num_threads = 18
+iter = 200
+burn = 0
+thin = 1
+save_csv = True
 
 # connect to mysql
 def mysql_to_recarray(cursor, query):
@@ -329,15 +334,128 @@ for c in c_list:
     mod_mc.use_step_method(mc.AdaptiveMetropolis, mod_mc.pi_c_samples[c], cov=np.array(C_c.value*.01), interval=100)
 
 # find good initial conditions with MAP approximation
-if find_start_vals==True:
-    for var_list in [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.rho]] + \
-        [[mod_mc.data_likelihood, s] for s in mod_mc.pi_s_samples] + \
-        [[mod_mc.data_likelihood, r] for r in mod_mc.pi_r_samples] + \
-        [[mod_mc.data_likelihood, c] for c in mod_mc.pi_c_samples] + \
-        [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.rho]]:
-        print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-        mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-        print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
+for var_list in [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.rho]] + \
+    [[mod_mc.data_likelihood, s] for s in mod_mc.pi_s_samples] + \
+    [[mod_mc.data_likelihood, r] for r in mod_mc.pi_r_samples] + \
+    [[mod_mc.data_likelihood, c] for c in mod_mc.pi_c_samples] + \
+    [[mod_mc.data_likelihood, mod_mc.beta, mod_mc.rho]]:
+    print 'attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+    mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
+    print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
 
+# sample the model
+mod_mc.sample(iter=iter, burn=burn, thin=thin, verbose=1)
 
+# plot MCMC diagnostics
+os.chdir('/home/j/Project/Causes of Death/CoDMod/tmp/')
+mc.Matplot.plot(mod_mc.beta, suffix='_' + name)
+mc.Matplot.plot(mod_mc, suffix='_' + name)
+mc.Matplot.autocorrelation(mod_mc.alpha, suffix='_acf_' + name)
 
+''' Use the MCMC traces to predict the test data '''
+# setup constants
+num_test_rows = test_data.shape[0]
+num_iters = mod_mc.beta.trace().shape[0]
+
+# indices
+t_index = dict([(t, i) for i, t in enumerate(year_list)])
+a_index = dict([(a, i) for i, a in enumerate(age_list)])
+
+# fixed effects
+X = np.array([test_data['x%d'%i] for i in range(mod_mc.beta.value.shape[0])])
+BX = np.dot(mod_mc.beta.trace(), X)
+
+# exposure
+'''
+if training_type == 'make predictions':
+    E = np.ones((num_iters, num_test_rows))*test_data.envelope
+else:
+    E = np.random.binomial(np.round(test_data.envelope).astype('int'), (test_data.sample_size/test_data.envelope), (num_iters, num_test_rows))
+'''
+E = np.ones((num_iters, num_test_rows))*test_data.envelope
+
+# pi_s
+s_index = [np.where(test_data.super_region==s) for s in super_region_list]
+t_by_s = [[t_index[test_data.year[j]] for j in s_index[s][0]] for s in range(len(super_region_list))]
+a_by_s = [[a_index[test_data.age[j]] for j in s_index[s][0]] for s in range(len(super_region_list))]
+pi_s = np.zeros((num_iters, num_test_rows))
+for s in range(len(super_region_list)):
+    pi_s[:,s_index[s][0]] = mod_mc.pi_s_list.trace()[:,s][:,a_by_s[s],t_by_s[s]]
+test_s_index = s_index
+
+# pi_r
+r_index = [np.where(test_data.region==r) for r in region_list]
+t_by_r = [[t_index[test_data.year[j]] for j in r_index[r][0]] for r in range(len(region_list))]
+a_by_r = [[a_index[test_data.age[j]] for j in r_index[r][0]] for r in range(len(region_list))]
+pi_r = np.zeros((num_iters, num_test_rows))
+for r in range(len(region_list)):
+    pi_r[:,r_index[r][0]] = mod_mc.pi_r_list.trace()[:,r][:,a_by_r[r],t_by_r[r]]
+test_r_index = r_index
+
+# pi_c
+c_index = [np.where(test_data.country==c) for c in country_list]
+t_by_c = [[t_index[test_data.year[j]] for j in c_index[c][0]] for c in range(len(country_list))]
+a_by_c = [[a_index[test_data.age[j]] for j in c_index[c][0]] for c in range(len(country_list))]
+pi_c = np.zeros((num_iters, num_test_rows))
+for c in range(len(country_list)):
+    pi_c[:,c_index[c][0]] = mod_mc.pi_c_list.trace()[:,c][:,a_by_c[c],t_by_c[c]]	
+test_c_index = c_index
+
+# make predictions
+import os
+os.chdir('/home/j/Project/Causes of Death/CoDMod/codmod2/')
+import percentile
+predictions = np.exp(BX + np.log(E) + pi_s + pi_r + pi_c)
+mean = predictions.mean(axis=0)
+lower = percentile.percentile(predictions, 2.5, axis=0)
+upper = percentile.percentile(predictions, 97.5, axis=0)
+predictions = test_data[['country','region','super_region','year','age','pop']]
+predictions = recfunctions.append_fields(predictions, 'mean_deaths', mean)
+predictions = recfunctions.append_fields(predictions, 'lower_deaths', lower)
+predictions = recfunctions.append_fields(predictions, 'upper_deaths', upper)
+if training_type != 'make predictions':
+    predictions = recfunctions.append_fields(predictions, 'actual_deaths', test_data.cf*test_data.envelope)
+predictions = predictions.view(np.recarray)
+
+# save the predictions
+if save_csv == True:
+    pl.rec2csv(predictions, '/home/j/Project/Causes of Death/CoDMod/tmp/' + name + '_predictions_' + cause + '_' + sex + '.csv')
+
+''' Provide metrics of fit to determine how well the model performed '''
+# TODO: code up RMSE for non-holdout predictions
+if training_type == 'make predictions':
+    print 'RMSE for non-holdout data not yet implemented'
+
+# calculate age-adjusted rates on the test data
+else:
+    predicted = predictions[['country','year','age','pop','actual_deaths', 'mean_deaths', 'upper_deaths', 'lower_deaths']].view(np.recarray)
+    predicted = recfunctions.append_fields(predicted, 'mean_rate', predicted.mean_deaths / predicted.pop * 100000.).view(np.recarray)
+    predicted = recfunctions.append_fields(predicted, 'actual_rate', predicted.actual_deaths / predicted.pop * 100000.).view(np.recarray)
+    predicted = recfunctions.append_fields(predicted, 'weight', np.ones(predicted.shape[0])).view(np.recarray)
+    for a in age_list:
+        predicted.weight[np.where(predicted.age==a)[0]] = age_weights.weight[np.where(age_weights.age==a)[0]]
+    predicted.mean_rate = predicted.mean_rate * predicted.weight
+    predicted.actual_rate = predicted.actual_rate * predicted.weight
+    from matplotlib import mlab
+    adj_rates = mlab.rec_groupby(predicted, ('country','year'), (('mean_rate', np.sum, 'adj_mean_rate'),('actual_rate', np.sum, 'adj_actual_rate')))
+
+    # calculate RMSE/RMdSE
+    err = adj_rates.adj_mean_rate - adj_rates.adj_actual_rate
+    sq_err = err ** 2.
+    mse = np.mean(sq_err)
+    mdse = np.median(sq_err)
+    rmse = np.sqrt(mse)
+    rmdse = np.sqrt(mdse)
+
+    # calculate AARE/MdARE
+    abs_rel_err = np.abs(err / adj_rates.adj_actual_rate)
+    aare = np.mean(abs_rel_err)
+    mdare = np.median(abs_rel_err)
+
+    # calculate coverage (age-specific, not age-adjusted)
+    coverage = np.array((predicted.upper_deaths >= predicted.actual_deaths) & (predicted.lower_deaths <= predicted.actual_deaths)).astype(np.int).mean()
+
+    # output fit metrics
+    print 'Root Mean Square Error: ' + str(rmse), '\nRoot Median Square Error: ' + str(rmdse), '\nAverage Absolute Relative Error: ' + str(aare), '\nMedian Absolute Relative Error: ' + str(mdare), '\nCoverage: ' + str(coverage)
+    pl.rec2csv(np.core.records.fromarrays([np.array(('rmse','rmdse','aare','mdare','coverage')),np.array((rmse,rmdse,aare,mdare,coverage))], names=['metric','value']), '/home/j/Project/Causes of Death/CoDMod/tmp/' + name + '_fits_' + cause + '_' + sex + '.csv')
+   

@@ -298,7 +298,7 @@ class codmod:
             
             # if we're just testing, take just a small subset
             if self.just_testing == True:
-                self.country_list = np.array(['USA','RUS','CAN','UKR','IND','BGD','THA','GBR'])
+                self.country_list = np.array(['USA','CAN','GBR'])
                 obs_keeper = np.zeros(self.observation_matrix.shape[0])
                 pred_keeper = np.zeros(self.prediction_matrix.shape[0])
                 for i in self.country_list:
@@ -335,7 +335,7 @@ class codmod:
         except IOError:
             raise IOError('No cached data found.')
         if self.just_testing == True:
-            self.country_list = np.array(['USA','RUS','CAN','UKR','IND','BGD','THA','GBR'])
+            self.country_list = np.array(['USA','CAN','GBR'])
             obs_keeper = np.zeros(self.observation_matrix.shape[0])
             pred_keeper = np.zeros(self.prediction_matrix.shape[0])
             for i in self.country_list:
@@ -649,6 +649,8 @@ class codmod:
             for i in range(num_iters):
                 interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_s_'+str(s)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
                 pi_s[i,s_index[s][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_s[s],t_by_s[s]]
+            mean_pi_s = pi_s[:,s_index[s][0]].mean(axis=1)
+            pi_s[:,s_index[s][0]] = pi_s[:,s_index[s][0]][np.argsort(mean_pi_s)]
         
         # pi_r
         r_index = [np.where(self.test_data.region==r) for r in self.region_list]
@@ -659,6 +661,8 @@ class codmod:
             for i in range(num_iters):
                 interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_r_'+str(r)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
                 pi_r[i,r_index[r][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_r[r],t_by_r[r]]
+            mean_pi_r = pi_r[:,r_index[r][0]].mean(axis=1)
+            pi_r[:,r_index[r][0]] = pi_r[:,r_index[r][0]][np.argsort(mean_pi_r)]
 
         # pi_c
         c_index = [np.where(self.test_data.country==c) for c in self.country_list]
@@ -669,6 +673,8 @@ class codmod:
             for i in range(num_iters):
                 interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_c_'+str(c)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
                 pi_c[i,c_index[c][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_c[c],t_by_c[c]]
+            mean_pi_c = pi_c[:,c_index[c][0]].mean(axis=1)
+            pi_s[:,c_index[c][0]] = pi_c[:,c_index[c][0]][np.argsort(mean_pi_c)]
 
         # make predictions
         import os

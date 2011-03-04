@@ -16,7 +16,7 @@ m.set_pi_samples(age_samples=[15,25,35,45], year_samples=[1980,1990,2000,2010])
 
 # load in the data
 m.load(use_cache=True)
-#m.training_split(holdout_unit='none')
+m.training_split(holdout_unit='none')
 
 # build the model
 m.initialize_model()
@@ -31,7 +31,7 @@ m.NormApprox(iters=1)
 m.predict_test(save_csv=False)
 
 # find fits
-#m.measure_fit()
+m.measure_fit()
 
 # make MCMC diagnostic plots
 #m.mcmc_diagnostics()

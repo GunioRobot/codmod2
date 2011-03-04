@@ -335,7 +335,7 @@ class codmod:
         except IOError:
             raise IOError('No cached data found.')
         if self.just_testing == True:
-            self.country_list = np.array(['USA','CAN','GBR'])
+            self.country_list = np.array(['USA','RUS','CAN','UKR','IND','BGD','THA','GBR'])
             obs_keeper = np.zeros(self.observation_matrix.shape[0])
             pred_keeper = np.zeros(self.prediction_matrix.shape[0])
             for i in self.country_list:

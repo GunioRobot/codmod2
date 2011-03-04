@@ -492,6 +492,7 @@ class codmod:
             for t in self.year_samples:
                 sample_points.append([a,t])
         sample_points = np.array(sample_points)
+        self.sample_points = sample_points
 
         # choose the degree for spline fitting (prefer cubic, but for undersampling pick smaller)
         kx = 3 if len(self.age_samples) > 3 else len(self.age_samples)-1
@@ -567,7 +568,7 @@ class codmod:
 
         # parameter predictions
         @mc.deterministic
-        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=E.random()):
+        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=E):
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
@@ -594,11 +595,11 @@ class codmod:
                 [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
                 [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
                 [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples]:
-                print 'Iteration: attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+                print 'Iteration ' + str(i+1) + ': attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
                 t = mc.NormApprox(var_list)
                 t.fit(method='fmin_powell', verbose=1)
                 if i+1==iters:
-                    t.sample(500)
+                    t.sample(200)
                     for v in var_list:
                         if v.__name__=='data_likelihood':
                             continue
@@ -610,7 +611,7 @@ class codmod:
         ''' Use the MCMC traces to predict the test data '''
         # setup constants
         num_test_rows = self.test_data.shape[0]
-        num_iters = self.mod_mc.beta.trace().shape[0]
+        num_iters = self.approxs['beta'].shape[0]
 
         # indices
         t_index = dict([(t, i) for i, t in enumerate(self.year_list)])
@@ -618,7 +619,7 @@ class codmod:
 
         # fixed effects
         X = np.array([self.test_data['x%d'%i] for i in range(self.mod_mc.beta.value.shape[0])])
-        BX = np.dot(self.mod_mc.beta.trace(), X)
+        BX = np.dot(self.approxs['beta'], X)
 
         # exposure
         '''
@@ -629,23 +630,35 @@ class codmod:
         '''
         E = np.ones((num_iters, num_test_rows))*self.test_data.envelope
 
+        # interpolation parameters
+        x_samples = self.sample_points[:,0]
+        y_samples = self.sample_points[:,1]
+        xb = self.age_list[0]
+        xe = self.age_list[-1]
+        yb = self.year_list[0]
+        ye = self.year_list[-1]
+        kx = 3 if len(self.age_samples) > 3 else len(self.age_samples)-1
+        ky = 3 if len(self.year_samples) > 3 else len(self.year_samples)-1
+        
         # pi_s
         s_index = [np.where(self.test_data.super_region==s) for s in self.super_region_list]
         t_by_s = [[t_index[self.test_data.year[j]] for j in s_index[s][0]] for s in range(len(self.super_region_list))]
         a_by_s = [[a_index[self.test_data.age[j]] for j in s_index[s][0]] for s in range(len(self.super_region_list))]
         pi_s = np.zeros((num_iters, num_test_rows))
         for s in range(len(self.super_region_list)):
-            pi_s[:,s_index[s][0]] = self.mod_mc.pi_s_list.trace()[:,s][:,a_by_s[s],t_by_s[s]]
-        self.test_s_index = s_index
-
+            for i in range(num_iters):
+                interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_s_'+str(s)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
+                pi_s[i,s_index[s][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_s[s],t_by_s[s]]
+        
         # pi_r
         r_index = [np.where(self.test_data.region==r) for r in self.region_list]
         t_by_r = [[t_index[self.test_data.year[j]] for j in r_index[r][0]] for r in range(len(self.region_list))]
         a_by_r = [[a_index[self.test_data.age[j]] for j in r_index[r][0]] for r in range(len(self.region_list))]
         pi_r = np.zeros((num_iters, num_test_rows))
         for r in range(len(self.region_list)):
-            pi_r[:,r_index[r][0]] = self.mod_mc.pi_r_list.trace()[:,r][:,a_by_r[r],t_by_r[r]]
-        self.test_r_index = r_index
+            for i in range(num_iters):
+                interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_r_'+str(r)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
+                pi_r[i,r_index[r][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_r[r],t_by_r[r]]
 
         # pi_c
         c_index = [np.where(self.test_data.country==c) for c in self.country_list]
@@ -653,8 +666,9 @@ class codmod:
         a_by_c = [[a_index[self.test_data.age[j]] for j in c_index[c][0]] for c in range(len(self.country_list))]
         pi_c = np.zeros((num_iters, num_test_rows))
         for c in range(len(self.country_list)):
-            pi_c[:,c_index[c][0]] = self.mod_mc.pi_c_list.trace()[:,c][:,a_by_c[c],t_by_c[c]]	
-        self.test_c_index = c_index
+            for i in range(num_iters):
+                interpolator = interpolate.bisplrep(x=x_samples, y=y_samples, z=self.approxs['pi_c_'+str(c)][i], xb=xb, xe=xe, yb=yb, ye=ye, kx=kx, ky=ky)
+                pi_c[i,c_index[c][0]] = interpolate.bisplev(x=self.age_list, y=self.year_list, tck=interpolator)[a_by_c[c],t_by_c[c]]
 
         # make predictions
         import os

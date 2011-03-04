@@ -22,13 +22,13 @@ m.load(use_cache=True)
 m.initialize_model()
 
 # use MAP to find starting values
-m.NormApprox()
+m.NormApprox(iters=1)
 
 # use MCMC to find posterior
 #m.sample(iter=1000, burn=0, thin=1)
 
 # make predictions
-#m.predict_test(save_csv=False)
+m.predict_test(save_csv=False)
 
 # find fits
 #m.measure_fit()

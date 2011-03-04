@@ -18,11 +18,11 @@ m.set_pi_samples(age_samples=[15,25,35,45], year_samples=[1980,1990,2000,2010])
 m.load(use_cache=True)
 #m.training_split(holdout_unit='none')
 
-# build the model and use MAP to find starting values
+# build the model
 m.initialize_model()
 
-m.MAP(iters=1)
-#m.NormApprox(samples=10)
+# use MAP to find starting values
+m.NormApprox()
 
 # use MCMC to find posterior
 #m.sample(iter=1000, burn=0, thin=1)

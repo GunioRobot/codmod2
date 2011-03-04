@@ -567,7 +567,7 @@ class codmod:
 
         # parameter predictions
         @mc.deterministic
-        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=E):
+        def param_pred(fixed_effect=fixed_effect, pi_s=pi_s, pi_r=pi_r, pi_c=pi_c, E=E.random()):
             return np.exp(np.vstack([fixed_effect, np.log(E), pi_s, pi_r, pi_c]).sum(axis=0))
 
         # observe the data
@@ -586,43 +586,25 @@ class codmod:
         # create the model
         self.mod_mc = mc.NormApprox(vars(), db='ram')
 
-    def MAP(self, iters=1):
-        '''Use MAP to iterate through and find good fits '''
+    def NormApprox(self, iters=1):
+        '''Use NormApprox to iterate through and find good fits '''
+        self.approxs = {}
         for i in range(iters):
             for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]] + \
                 [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
-                [[self.mod_mc.data_likelihood, self.mod_mc.sigma_s, self.mod_mc.tau_s]] + \
                 [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
-                [[self.mod_mc.data_likelihood, self.mod_mc.sigma_r, self.mod_mc.tau_r]] + \
-                [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples] + \
-                [[self.mod_mc.data_likelihood, self.mod_mc.sigma_c, self.mod_mc.tau_c]]:
-                print 'Iteration ' + str(i) + ': attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-                mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
+                [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples]:
+                print 'Iteration: attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
+                t = mc.NormApprox(var_list)
+                t.fit(method='fmin_powell', verbose=1)
+                if i+1==iters:
+                    t.sample(500)
+                    for v in var_list:
+                        if v.__name__=='data_likelihood':
+                            continue
+                        else:
+                            self.approxs[v.__name__] = t.trace(v.__name__)()
                 print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-        var_list = [self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]
-        print 'Finishing MAP: attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-        mc.MAP(var_list).fit(method='fmin_powell', verbose=1)
-        print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-
-
-    def NormApprox(self, samples=250):
-        ''' Use NormApprox to come up with confidence intervals '''
-        approxs = {}
-        for var_list in [[self.mod_mc.data_likelihood, self.mod_mc.beta, self.mod_mc.rho]] + \
-            [[self.mod_mc.data_likelihood, s] for s in self.mod_mc.pi_s_samples] + \
-            [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
-            [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples]:
-            print 'Approximating %s' % [v.__name__ for v in var_list]
-            submod = mc.NormApprox(var_list)
-            submod.fit(method='fmin_powell', verbose=1)
-            submod.sample(samples)
-            for v in var_list:
-                if v.__name__=='data_likelihood':
-                    continue
-                approxs[v.__name__] = submod.trace(v.__name__)()
-            print ''.join(['%s: %s\n' % (v.__name__, v.value) for v in var_list[1:]])
-        self.approxs = approxs
-
 
     def predict_test(self, save_csv=False):
         ''' Use the MCMC traces to predict the test data '''

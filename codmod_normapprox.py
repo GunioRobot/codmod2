@@ -596,9 +596,12 @@ class codmod:
                 [[self.mod_mc.data_likelihood, r] for r in self.mod_mc.pi_r_samples] + \
                 [[self.mod_mc.data_likelihood, c] for c in self.mod_mc.pi_c_samples]:
                 print 'Iteration ' + str(i+1) + ': attempting to maximize likelihood of %s' % [v.__name__ for v in var_list]
-                t = mc.NormApprox(var_list)
-                t.fit(method='fmin_powell', verbose=1)
-                if i+1==iters:
+                if i+1 < iters:
+                    t = mc.MAP(var_list)
+                    t.fit(method='fmin_powell', verbose=1)
+                else:
+                    t = mc.NormApprox(var_list)
+                    t.fit(method='fmin_powell', verbose=1)
                     t.sample(200)
                     for v in var_list:
                         if v.__name__=='data_likelihood':

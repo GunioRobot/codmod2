@@ -4,7 +4,7 @@ Date:       February 28, 2011
 Purpose:    Run codmod2 on maternal for several different predictive validity tests
 '''
 
-modname = 'normapprox'
+modname = '5samp'
 import os
 for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 'country-year3', 'datapoint1', 'datapoint2', 'datapoint3','none1']:
     if t[:-1] == 'none':
@@ -21,7 +21,7 @@ for t in ['country1', 'country2', 'country3', 'country-year1', 'country-year2', 
     f.write("m = cm.codmod('Ab10','female','" + modname + "_" + tname + "')" + "\n")
     f.write("m.set_covariates(covariate_list=['year','education_yrs_pc','ln(TFR)','neonatal_deaths_per1000','ln(LDI_pc)','HIV_prevalence_pct'], age_dummies=True, age_ref=30, normalize=True)" + "\n")
     f.write("m.set_window(age_range=[15,45], year_range=[1980,2010])" + "\n")
-    f.write("m.set_pi_samples(age_samples=[15,25,35,45], year_samples=[1980,1990,2000,2010])" + "\n")
+    f.write("m.set_pi_samples(age_samples=[15,25,35,45], year_samples=[1980,1985,1990,1995,2000,2005,2010])" + "\n")
     f.write("m.load(use_cache=True)" + "\n")
     f.write("m.training_split(holdout_unit='" + t[:-1] + "', holdout_prop=.2)" + "\n")
     f.write("m.initialize_model()" + "\n")

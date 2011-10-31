@@ -18,7 +18,7 @@ Y_c,t,a ~ NegativeBinomial(mu_c,t,a, alpha)
 
                 E       ~ exposure (total number of all-cause deaths observed)
                           Binomial(n = total deaths in country, p = proportion recorded in study)
-                
+
                 pi_s    ~ 'random effect' by super-region
                           year*age grid of offsets
                           sampled from MVN with matern covariance then interpolated via cubic spline
